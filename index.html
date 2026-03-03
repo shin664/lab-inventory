@@ -719,6 +719,68 @@
             }
         }
 
+        /* Scan Mode Selector */
+        .scan-mode-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .scan-mode-btn {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 8px;
+            border: 2px solid var(--border);
+            border-radius: 10px;
+            background: var(--card);
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 4px;
+            min-height: 64px;
+        }
+
+        .scan-mode-btn.active {
+            border-color: var(--primary);
+            background: rgba(37, 99, 235, 0.08);
+        }
+
+        .scan-mode-btn:active { transform: scale(0.97); }
+
+        .scan-mode-icon {
+            font-size: 20px;
+            color: var(--text-light);
+        }
+
+        .scan-mode-btn.active .scan-mode-icon {
+            color: var(--primary);
+        }
+
+        .scan-mode-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+            color: var(--text);
+            line-height: 1.4;
+        }
+
+        .scan-mode-label small {
+            font-weight: 400;
+            color: var(--text-light);
+            font-size: 10px;
+        }
+
+        /* Viewfinder guide overlay label */
+        .scan-hint {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 6px;
+            margin-bottom: 8px;
+        }
+
         /* Print Styles */
         @media print {
             body { background: white; color: black; font-size: 11px; }
@@ -751,13 +813,27 @@
             <div class="page active" id="page-scan">
                 <div class="page-padding">
                     <div class="form-group">
-                        <label>バーコード/QRコード</label>
-                        <div id="qr-reader" style="width: 100%;"></div>
-                        <button class="btn btn-secondary btn-block" id="btn-start-scan">カメラを開始</button>
+                        <label>スキャンモード</label>
+                        <div class="scan-mode-group" id="scan-mode-group">
+                            <button class="scan-mode-btn active" data-mode="1d" title="GS1-128・EAN・Code128等の1Dバーコード">
+                                <span class="scan-mode-icon">▬</span>
+                                <span class="scan-mode-label">1Dバーコード<br><small>GS1-128 / EAN / Code128</small></span>
+                            </button>
+                            <button class="scan-mode-btn" data-mode="2d" title="QRコード・DataMatrix等の2Dコード">
+                                <span class="scan-mode-icon">⊞</span>
+                                <span class="scan-mode-label">2Dコード<br><small>QR / DataMatrix</small></span>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label>または手動で物品コードを入力</label>
+                        <label>バーコード/QRコード</label>
+                        <div id="qr-reader" style="width: 100%;"></div>
+                        <button class="btn btn-secondary btn-block" id="btn-start-scan">📷 カメラを開始</button>
+                    </div>
+
+                    <div class="form-group">
+                        <label>または手動でバーコードを入力</label>
                         <input type="text" id="manual-barcode-input" placeholder="バーコード番号を入力">
                         <button class="btn btn-primary btn-block" onclick="app.handleManualBarcodeLookup()">検索</button>
                     </div>
@@ -1108,6 +1184,7 @@
             selectedPerson: null,
             inoutMode: 'in',
             selectedItem: null,
+            scanMode: '1d',         // '1d' or '2d'
             qrScanner: null,
             scannerActive: false,
             inoutScanner: null,
@@ -1465,6 +1542,17 @@
 
                 document.getElementById('btn-start-scan').addEventListener('click', () => this.toggleScanner());
 
+                // スキャンモード切替
+                document.querySelectorAll('.scan-mode-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        if (this.scannerActive) {
+                            this.stopScanner().then(() => this._applyScanMode(btn.dataset.mode));
+                        } else {
+                            this._applyScanMode(btn.dataset.mode);
+                        }
+                    });
+                });
+
                 document.getElementById('inventory-search').addEventListener('input', (e) => {
                     this.filterInventory(e.target.value);
                 });
@@ -1561,6 +1649,73 @@
                 document.getElementById('page-title').textContent = titles[this.currentTab] || '臨床検査室 在庫管理システム';
             },
 
+            // =============================================
+            // スキャナー共通設定
+            // =============================================
+
+            _applyScanMode(mode) {
+                this.scanMode = mode;
+                document.querySelectorAll('.scan-mode-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.mode === mode);
+                });
+            },
+
+            // 最適なスキャン設定を返す（モードとビューファインダーサイズに応じて動的生成）
+            _getScanConfig(mode) {
+                const is1D = (mode || this.scanMode) === '1d';
+                return {
+                    fps: 15,
+                    // qrboxを関数にすることでビューファインダーの実サイズに合わせて最大化
+                    qrbox: (viewfinderWidth, viewfinderHeight) => {
+                        if (is1D) {
+                            // 1Dバーコード: 画面幅いっぱい × 縦は適切な高さ
+                            // GS1-128は横に長いため、最大幅・適度な高さが最適
+                            const w = Math.floor(viewfinderWidth * 0.92);
+                            const h = Math.max(120, Math.floor(viewfinderHeight * 0.28));
+                            return { width: w, height: h };
+                        } else {
+                            // 2Dコード: 正方形で最大化
+                            const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.88);
+                            return { width: side, height: side };
+                        }
+                    },
+                    // ネイティブBarcodeDetector APIを優先使用（DataMatrix等の精度向上）
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true
+                    },
+                    // 複数フォーマットを明示的に指定（ライブラリが絞り込み最適化）
+                    formatsToSupport: is1D ? [
+                        Html5QrcodeSupportedFormats.CODE_128,
+                        Html5QrcodeSupportedFormats.EAN_13,
+                        Html5QrcodeSupportedFormats.EAN_8,
+                        Html5QrcodeSupportedFormats.UPC_A,
+                        Html5QrcodeSupportedFormats.UPC_E,
+                        Html5QrcodeSupportedFormats.CODE_39,
+                        Html5QrcodeSupportedFormats.CODE_93,
+                        Html5QrcodeSupportedFormats.ITF,
+                        Html5QrcodeSupportedFormats.CODABAR,
+                    ] : [
+                        Html5QrcodeSupportedFormats.QR_CODE,
+                        Html5QrcodeSupportedFormats.DATA_MATRIX,
+                        Html5QrcodeSupportedFormats.PDF_417,
+                        Html5QrcodeSupportedFormats.AZTEC,
+                        Html5QrcodeSupportedFormats.CODE_128,
+                        Html5QrcodeSupportedFormats.EAN_13,
+                    ],
+                };
+            },
+
+            // 高解像度カメラ制約（大きなバーコードでも読めるよう高解像度優先）
+            _getCameraConstraints() {
+                return {
+                    facingMode: 'environment',
+                    width:  { ideal: 1920, min: 640 },
+                    height: { ideal: 1080, min: 480 },
+                    // 対応端末ではオートフォーカスを継続モードに
+                    advanced: [{ focusMode: 'continuous' }]
+                };
+            },
+
             toggleScanner() {
                 if (!this.scannerActive) {
                     this.startScanner();
@@ -1571,35 +1726,53 @@
 
             startScanner() {
                 this.scannerActive = true;
-                document.getElementById('btn-start-scan').textContent = 'カメラを停止';
-                document.getElementById('btn-start-scan').classList.remove('btn-secondary');
-                document.getElementById('btn-start-scan').classList.add('btn-danger');
+                const btn = document.getElementById('btn-start-scan');
+                btn.textContent = '📷 カメラを停止';
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-danger');
+
+                const config = this._getScanConfig(this.scanMode);
+                // Html5QrcodeSupportedFormats が未定義の場合はformatsToSupportを除外
+                if (typeof Html5QrcodeSupportedFormats === 'undefined') {
+                    delete config.formatsToSupport;
+                }
 
                 this.qrScanner = new Html5Qrcode('qr-reader');
                 this.qrScanner.start(
-                    { facingMode: 'environment' },
-                    {
-                        fps: 10,
-                        qrbox: { width: 250, height: 250 }
-                    },
+                    this._getCameraConstraints(),
+                    config,
                     (decodedText) => this.handleScanResult(decodedText),
-                    (error) => console.log('Scan error:', error)
+                    () => {}
                 ).catch(err => {
-                    console.error('Failed to start scanner:', err);
-                    alert('カメラへのアクセスに失敗しました');
-                    this.stopScanner();
+                    console.error('Scanner start failed, retrying with basic config:', err);
+                    // フォールバック: シンプルな設定で再試行
+                    this.qrScanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
+                        (decodedText) => this.handleScanResult(decodedText),
+                        () => {}
+                    ).catch(() => {
+                        alert('カメラへのアクセスに失敗しました');
+                        this.stopScanner();
+                    });
                 });
             },
 
             stopScanner() {
-                if (this.qrScanner) {
-                    this.qrScanner.stop().then(() => {
-                        this.scannerActive = false;
-                        document.getElementById('btn-start-scan').textContent = 'カメラを開始';
-                        document.getElementById('btn-start-scan').classList.add('btn-secondary');
-                        document.getElementById('btn-start-scan').classList.remove('btn-danger');
-                    }).catch(err => console.error('Failed to stop scanner:', err));
-                }
+                return new Promise((resolve) => {
+                    if (this.qrScanner && this.scannerActive) {
+                        this.qrScanner.stop().then(() => {
+                            this.scannerActive = false;
+                            const btn = document.getElementById('btn-start-scan');
+                            btn.textContent = '📷 カメラを開始';
+                            btn.classList.add('btn-secondary');
+                            btn.classList.remove('btn-danger');
+                            resolve();
+                        }).catch(() => resolve());
+                    } else {
+                        resolve();
+                    }
+                });
             },
 
             async handleScanResult(barcode) {
@@ -2471,29 +2644,41 @@
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
+                const config = this._getScanConfig(this.scanMode);
+                if (typeof Html5QrcodeSupportedFormats === 'undefined') delete config.formatsToSupport;
+
                 this.inoutScanner = new Html5Qrcode('inout-qr-reader');
                 this.inoutScanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    this._getCameraConstraints(),
+                    config,
                     (decodedText) => this.handleInoutScanResult(decodedText),
-                    (error) => {}
-                ).catch(err => {
-                    console.error('Failed to start inout scanner:', err);
-                    alert('カメラへのアクセスに失敗しました');
-                    this.stopInoutScanner();
+                    () => {}
+                ).catch(() => {
+                    this.inoutScanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
+                        (decodedText) => this.handleInoutScanResult(decodedText),
+                        () => {}
+                    ).catch(() => {
+                        alert('カメラへのアクセスに失敗しました');
+                        this.stopInoutScanner();
+                    });
                 });
             },
 
             stopInoutScanner() {
-                if (this.inoutScanner) {
-                    this.inoutScanner.stop().then(() => {
-                        this.inoutScannerActive = false;
-                        const btn = document.getElementById('btn-inout-scan');
-                        btn.textContent = '📷 カメラで読取';
-                        btn.classList.add('btn-secondary');
-                        btn.classList.remove('btn-danger');
-                    }).catch(err => console.error('Failed to stop inout scanner:', err));
-                }
+                return new Promise((resolve) => {
+                    if (this.inoutScanner && this.inoutScannerActive) {
+                        this.inoutScanner.stop().then(() => {
+                            this.inoutScannerActive = false;
+                            const btn = document.getElementById('btn-inout-scan');
+                            btn.textContent = '📷 カメラで読取';
+                            btn.classList.add('btn-secondary');
+                            btn.classList.remove('btn-danger');
+                            resolve();
+                        }).catch(() => resolve());
+                    } else { resolve(); }
+                });
             },
 
             async handleInoutScanResult(barcode) {
@@ -2627,32 +2812,56 @@
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
+                const config = this._getScanConfig(this.scanMode);
+                if (typeof Html5QrcodeSupportedFormats === 'undefined') delete config.formatsToSupport;
+
                 this.newItemScanner = new Html5Qrcode('new-item-qr-reader');
                 this.newItemScanner.start(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 250, height: 200 } },
+                    this._getCameraConstraints(),
+                    config,
                     (decodedText) => {
-                        document.getElementById('new-item-barcode').value = decodedText;
+                        // GS1バーコードならGTINを抽出してバーコード欄へ
+                        const parsed = this.detectAndParseBarcode(decodedText);
+                        const barcodeVal = (parsed.type === 'gs1' && parsed.data.gtinVariants)
+                            ? parsed.data.gtinVariants[0]
+                            : decodedText;
+                        document.getElementById('new-item-barcode').value = barcodeVal;
+                        // 使用期限もあれば自動入力
+                        if (parsed.type === 'gs1' && parsed.data.expiryInput) {
+                            document.getElementById('new-item-expiry').value = parsed.data.expiryInput;
+                        }
                         this.stopNewItemScanner();
                     },
-                    (error) => {}
-                ).catch(err => {
-                    console.error('Failed to start new item scanner:', err);
-                    alert('カメラへのアクセスに失敗しました');
-                    this.stopNewItemScanner();
+                    () => {}
+                ).catch(() => {
+                    this.newItemScanner.start(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
+                        (decodedText) => {
+                            document.getElementById('new-item-barcode').value = decodedText;
+                            this.stopNewItemScanner();
+                        },
+                        () => {}
+                    ).catch(() => {
+                        alert('カメラへのアクセスに失敗しました');
+                        this.stopNewItemScanner();
+                    });
                 });
             },
 
             stopNewItemScanner() {
-                if (this.newItemScanner) {
-                    this.newItemScanner.stop().then(() => {
-                        this.newItemScannerActive = false;
-                        const btn = document.getElementById('btn-scan-new-item-barcode');
-                        btn.textContent = '📷 読取';
-                        btn.classList.add('btn-secondary');
-                        btn.classList.remove('btn-danger');
-                    }).catch(err => console.error('Failed to stop new item scanner:', err));
-                }
+                return new Promise((resolve) => {
+                    if (this.newItemScanner && this.newItemScannerActive) {
+                        this.newItemScanner.stop().then(() => {
+                            this.newItemScannerActive = false;
+                            const btn = document.getElementById('btn-scan-new-item-barcode');
+                            btn.textContent = '📷 読取';
+                            btn.classList.add('btn-secondary');
+                            btn.classList.remove('btn-danger');
+                            resolve();
+                        }).catch(() => resolve());
+                    } else { resolve(); }
+                });
             },
 
             async submitNewItem() {
