@@ -1660,60 +1660,75 @@
                 });
             },
 
-            // 最適なスキャン設定を返す（モードとビューファインダーサイズに応じて動的生成）
+            // start()に渡すスキャン設定（qrbox・fpsのみ）
             _getScanConfig(mode) {
                 const is1D = (mode || this.scanMode) === '1d';
                 return {
                     fps: 15,
-                    // qrboxを関数にすることでビューファインダーの実サイズに合わせて最大化
                     qrbox: (viewfinderWidth, viewfinderHeight) => {
                         if (is1D) {
-                            // 1Dバーコード: 画面幅いっぱい × 縦は適切な高さ
-                            // GS1-128は横に長いため、最大幅・適度な高さが最適
+                            // GS1-128等の横長バーコード: 幅最大・高さ最小限
                             const w = Math.floor(viewfinderWidth * 0.92);
                             const h = Math.max(120, Math.floor(viewfinderHeight * 0.28));
                             return { width: w, height: h };
                         } else {
-                            // 2Dコード: 正方形で最大化
+                            // QR/DataMatrix: 正方形で最大化
                             const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.88);
                             return { width: side, height: side };
                         }
                     },
-                    // ネイティブBarcodeDetector APIを優先使用（DataMatrix等の精度向上）
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true
-                    },
-                    // 複数フォーマットを明示的に指定（ライブラリが絞り込み最適化）
-                    formatsToSupport: is1D ? [
-                        Html5QrcodeSupportedFormats.CODE_128,
-                        Html5QrcodeSupportedFormats.EAN_13,
-                        Html5QrcodeSupportedFormats.EAN_8,
-                        Html5QrcodeSupportedFormats.UPC_A,
-                        Html5QrcodeSupportedFormats.UPC_E,
-                        Html5QrcodeSupportedFormats.CODE_39,
-                        Html5QrcodeSupportedFormats.CODE_93,
-                        Html5QrcodeSupportedFormats.ITF,
-                        Html5QrcodeSupportedFormats.CODABAR,
-                    ] : [
-                        Html5QrcodeSupportedFormats.QR_CODE,
-                        Html5QrcodeSupportedFormats.DATA_MATRIX,
-                        Html5QrcodeSupportedFormats.PDF_417,
-                        Html5QrcodeSupportedFormats.AZTEC,
-                        Html5QrcodeSupportedFormats.CODE_128,
-                        Html5QrcodeSupportedFormats.EAN_13,
-                    ],
                 };
             },
 
-            // 高解像度カメラ制約（大きなバーコードでも読めるよう高解像度優先）
+            // Html5Qrcodeコンストラクタに渡す設定（formatsToSupport・experimentalFeatures）
+            _getConstructorConfig(mode) {
+                const is1D = (mode || this.scanMode) === '1d';
+                const cfg = {
+                    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+                };
+                // Html5QrcodeSupportedFormats が利用可能な場合のみ指定
+                try {
+                    if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+                        cfg.formatsToSupport = is1D ? [
+                            Html5QrcodeSupportedFormats.CODE_128,
+                            Html5QrcodeSupportedFormats.EAN_13,
+                            Html5QrcodeSupportedFormats.EAN_8,
+                            Html5QrcodeSupportedFormats.UPC_A,
+                            Html5QrcodeSupportedFormats.UPC_E,
+                            Html5QrcodeSupportedFormats.CODE_39,
+                            Html5QrcodeSupportedFormats.CODE_93,
+                            Html5QrcodeSupportedFormats.ITF,
+                            Html5QrcodeSupportedFormats.CODABAR,
+                        ] : [
+                            Html5QrcodeSupportedFormats.QR_CODE,
+                            Html5QrcodeSupportedFormats.DATA_MATRIX,
+                            Html5QrcodeSupportedFormats.PDF_417,
+                            Html5QrcodeSupportedFormats.AZTEC,
+                            Html5QrcodeSupportedFormats.CODE_128,
+                            Html5QrcodeSupportedFormats.EAN_13,
+                        ];
+                    }
+                } catch(e) { /* 非対応なら省略 */ }
+                return cfg;
+            },
+
+            // カメラ制約（高解像度優先・必須条件なし）
             _getCameraConstraints() {
                 return {
                     facingMode: 'environment',
-                    width:  { ideal: 1920, min: 640 },
-                    height: { ideal: 1080, min: 480 },
-                    // 対応端末ではオートフォーカスを継続モードに
-                    advanced: [{ focusMode: 'continuous' }]
+                    width:  { ideal: 1920 },
+                    height: { ideal: 1080 },
                 };
+            },
+
+            // Html5Qrcodeインスタンスを安全に生成（コンストラクタ設定失敗時はシンプル版にフォールバック）
+            _createScanner(elementId) {
+                try {
+                    return new Html5Qrcode(elementId, this._getConstructorConfig(this.scanMode));
+                } catch(e) {
+                    console.warn('Html5Qrcode constructor with config failed, using basic:', e);
+                    return new Html5Qrcode(elementId);
+                }
             },
 
             toggleScanner() {
@@ -1731,30 +1746,31 @@
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const config = this._getScanConfig(this.scanMode);
-                // Html5QrcodeSupportedFormats が未定義の場合はformatsToSupportを除外
-                if (typeof Html5QrcodeSupportedFormats === 'undefined') {
-                    delete config.formatsToSupport;
-                }
-
-                this.qrScanner = new Html5Qrcode('qr-reader');
-                this.qrScanner.start(
-                    this._getCameraConstraints(),
-                    config,
-                    (decodedText) => this.handleScanResult(decodedText),
-                    () => {}
-                ).catch(err => {
-                    console.error('Scanner start failed, retrying with basic config:', err);
-                    // フォールバック: シンプルな設定で再試行
-                    this.qrScanner.start(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
+                const tryStart = (cameraConstraints, scanConfig) => {
+                    this.qrScanner = this._createScanner('qr-reader');
+                    return this.qrScanner.start(
+                        cameraConstraints,
+                        scanConfig,
                         (decodedText) => this.handleScanResult(decodedText),
                         () => {}
-                    ).catch(() => {
-                        alert('カメラへのアクセスに失敗しました');
-                        this.stopScanner();
-                    });
+                    );
+                };
+
+                // まず高解像度設定で試行し、失敗時にフォールバック
+                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
+                .catch(() => {
+                    console.warn('High-res camera failed, trying basic...');
+                    return tryStart(
+                        { facingMode: 'environment' },
+                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                    );
+                })
+                .catch(() => {
+                    alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
+                    this.scannerActive = false;
+                    btn.textContent = '📷 カメラを開始';
+                    btn.classList.add('btn-secondary');
+                    btn.classList.remove('btn-danger');
                 });
             },
 
@@ -2644,25 +2660,23 @@
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const config = this._getScanConfig(this.scanMode);
-                if (typeof Html5QrcodeSupportedFormats === 'undefined') delete config.formatsToSupport;
+                const tryStart = (cam, cfg) => {
+                    this.inoutScanner = this._createScanner('inout-qr-reader');
+                    return this.inoutScanner.start(cam, cfg,
+                        (decodedText) => this.handleInoutScanResult(decodedText), () => {});
+                };
 
-                this.inoutScanner = new Html5Qrcode('inout-qr-reader');
-                this.inoutScanner.start(
-                    this._getCameraConstraints(),
-                    config,
-                    (decodedText) => this.handleInoutScanResult(decodedText),
-                    () => {}
-                ).catch(() => {
-                    this.inoutScanner.start(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
-                        (decodedText) => this.handleInoutScanResult(decodedText),
-                        () => {}
-                    ).catch(() => {
-                        alert('カメラへのアクセスに失敗しました');
-                        this.stopInoutScanner();
-                    });
+                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
+                .catch(() => tryStart(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                ))
+                .catch(() => {
+                    alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
+                    this.inoutScannerActive = false;
+                    btn.textContent = '📷 カメラで読取';
+                    btn.classList.add('btn-secondary');
+                    btn.classList.remove('btn-danger');
                 });
             },
 
@@ -2812,40 +2826,30 @@
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const config = this._getScanConfig(this.scanMode);
-                if (typeof Html5QrcodeSupportedFormats === 'undefined') delete config.formatsToSupport;
+                const onDecode = (decodedText) => {
+                    const parsed = this.detectAndParseBarcode(decodedText);
+                    const barcodeVal = (parsed.type === 'gs1' && parsed.data.gtinVariants)
+                        ? parsed.data.gtinVariants[0] : decodedText;
+                    document.getElementById('new-item-barcode').value = barcodeVal;
+                    if (parsed.type === 'gs1' && parsed.data.expiryInput) {
+                        document.getElementById('new-item-expiry').value = parsed.data.expiryInput;
+                    }
+                    this.stopNewItemScanner();
+                };
 
-                this.newItemScanner = new Html5Qrcode('new-item-qr-reader');
-                this.newItemScanner.start(
-                    this._getCameraConstraints(),
-                    config,
-                    (decodedText) => {
-                        // GS1バーコードならGTINを抽出してバーコード欄へ
-                        const parsed = this.detectAndParseBarcode(decodedText);
-                        const barcodeVal = (parsed.type === 'gs1' && parsed.data.gtinVariants)
-                            ? parsed.data.gtinVariants[0]
-                            : decodedText;
-                        document.getElementById('new-item-barcode').value = barcodeVal;
-                        // 使用期限もあれば自動入力
-                        if (parsed.type === 'gs1' && parsed.data.expiryInput) {
-                            document.getElementById('new-item-expiry').value = parsed.data.expiryInput;
-                        }
-                        this.stopNewItemScanner();
-                    },
-                    () => {}
-                ).catch(() => {
-                    this.newItemScanner.start(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } },
-                        (decodedText) => {
-                            document.getElementById('new-item-barcode').value = decodedText;
-                            this.stopNewItemScanner();
-                        },
-                        () => {}
-                    ).catch(() => {
-                        alert('カメラへのアクセスに失敗しました');
-                        this.stopNewItemScanner();
-                    });
+                const tryStart = (cam, cfg) => {
+                    this.newItemScanner = this._createScanner('new-item-qr-reader');
+                    return this.newItemScanner.start(cam, cfg, onDecode, () => {});
+                };
+
+                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
+                .catch(() => tryStart(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                ))
+                .catch(() => {
+                    alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
+                    this.stopNewItemScanner();
                 });
             },
 
