@@ -541,11 +541,19 @@
         }
 
         /* Scanner */
-        #qr-reader {
+        #qr-reader, #inout-qr-reader, #new-item-qr-reader {
             width: 100%;
             border-radius: 8px;
             overflow: hidden;
-            margin-bottom: 16px;
+            margin-bottom: 8px;
+            position: relative;
+            background: #000;
+        }
+        #qr-reader video, #inout-qr-reader video, #new-item-qr-reader video {
+            width: 100%;
+            display: block;
+            max-height: 260px;
+            object-fit: cover;
         }
 
         .scanner-controls {
@@ -1068,7 +1076,7 @@
         </div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
     <script>
         // Comprehensive inventory database - 103 items
         const INITIAL_DB = [
@@ -1707,75 +1715,97 @@
                 });
             },
 
-            // start()に渡すスキャン設定（qrbox・fpsのみ）
-            _getScanConfig(mode) {
-                const is1D = (mode || this.scanMode) === '1d';
-                return {
-                    fps: 15,
-                    qrbox: (viewfinderWidth, viewfinderHeight) => {
-                        if (is1D) {
-                            // GS1-128等の横長バーコード: 幅最大・高さ最小限
-                            const w = Math.floor(viewfinderWidth * 0.92);
-                            const h = Math.max(150, Math.floor(viewfinderHeight * 0.30));
-                            return { width: w, height: h };
-                        } else {
-                            // QR/DataMatrix: 正方形で最大化
-                            const side = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.88);
-                            return { width: side, height: side };
-                        }
-                    },
-                };
-            },
+            // =============================================
+            // ZXing スキャナーヘルパー関数群
+            // =============================================
 
-            // Html5Qrcodeコンストラクタに渡す設定（formatsToSupport・experimentalFeatures）
-            _getConstructorConfig(mode) {
+            // ZXing用バーコードフォーマットリストを返す
+            _getZXingFormats(mode) {
                 const is1D = (mode || this.scanMode) === '1d';
-                const cfg = {
-                    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
-                };
-                // Html5QrcodeSupportedFormats が利用可能な場合のみ指定
                 try {
-                    if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
-                        cfg.formatsToSupport = is1D ? [
-                            Html5QrcodeSupportedFormats.CODE_128,
-                            Html5QrcodeSupportedFormats.EAN_13,
-                            Html5QrcodeSupportedFormats.EAN_8,
-                            Html5QrcodeSupportedFormats.UPC_A,
-                            Html5QrcodeSupportedFormats.UPC_E,
-                            Html5QrcodeSupportedFormats.CODE_39,
-                            Html5QrcodeSupportedFormats.CODE_93,
-                            Html5QrcodeSupportedFormats.ITF,
-                            Html5QrcodeSupportedFormats.CODABAR,
-                        ] : [
-                            Html5QrcodeSupportedFormats.QR_CODE,
-                            Html5QrcodeSupportedFormats.DATA_MATRIX,
-                            Html5QrcodeSupportedFormats.PDF_417,
-                            Html5QrcodeSupportedFormats.AZTEC,
-                            Html5QrcodeSupportedFormats.CODE_128,
-                            Html5QrcodeSupportedFormats.EAN_13,
+                    if (is1D) {
+                        return [
+                            ZXing.BarcodeFormat.CODE_128,  // GS1-128含む
+                            ZXing.BarcodeFormat.EAN_13,
+                            ZXing.BarcodeFormat.EAN_8,
+                            ZXing.BarcodeFormat.UPC_A,
+                            ZXing.BarcodeFormat.UPC_E,
+                            ZXing.BarcodeFormat.CODE_39,
+                            ZXing.BarcodeFormat.CODE_93,
+                            ZXing.BarcodeFormat.ITF,
+                            ZXing.BarcodeFormat.CODABAR,
+                        ];
+                    } else {
+                        return [
+                            ZXing.BarcodeFormat.QR_CODE,
+                            ZXing.BarcodeFormat.DATA_MATRIX,
+                            ZXing.BarcodeFormat.PDF_417,
+                            ZXing.BarcodeFormat.AZTEC,
+                            ZXing.BarcodeFormat.CODE_128,
+                            ZXing.BarcodeFormat.EAN_13,
                         ];
                     }
-                } catch(e) { /* 非対応なら省略 */ }
-                return cfg;
+                } catch(e) { return []; }
             },
 
-            // カメラ制約（高解像度優先・必須条件なし）
+            // ZXing BrowserMultiFormatReader インスタンスを生成
+            _createZXingReader(mode) {
+                try {
+                    const hints = new Map();
+                    const formats = this._getZXingFormats(mode);
+                    if (formats.length > 0) {
+                        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+                    }
+                    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                    return new ZXing.BrowserMultiFormatReader(hints, 80); // 80ms/フレーム
+                } catch(e) {
+                    console.warn('ZXing reader creation with hints failed, using default:', e);
+                    return new ZXing.BrowserMultiFormatReader();
+                }
+            },
+
+            // カメラ制約（高解像度優先）
             _getCameraConstraints() {
                 return {
-                    facingMode: 'environment',
-                    width:  { ideal: 1920 },
-                    height: { ideal: 1080 },
+                    video: {
+                        facingMode: 'environment',
+                        width:  { ideal: 1920 },
+                        height: { ideal: 1080 },
+                    }
                 };
             },
 
-            // Html5Qrcodeインスタンスを安全に生成（コンストラクタ設定失敗時はシンプル版にフォールバック）
-            _createScanner(elementId) {
-                try {
-                    return new Html5Qrcode(elementId, this._getConstructorConfig(this.scanMode));
-                } catch(e) {
-                    console.warn('Html5Qrcode constructor with config failed, using basic:', e);
-                    return new Html5Qrcode(elementId);
-                }
+            // スキャナーコンテナに video 要素とスキャン枠オーバーレイを設置し、video 要素を返す
+            _setupScannerContainer(elementId) {
+                const container = document.getElementById(elementId);
+                if (!container) return null;
+                container.innerHTML = '';
+
+                const video = document.createElement('video');
+                video.id = elementId + '-video';
+                video.setAttribute('playsinline', '');
+                video.setAttribute('muted', '');
+                video.style.cssText = 'width:100%;display:block;max-height:260px;object-fit:cover;';
+                container.appendChild(video);
+
+                // スキャン枠オーバーレイ（コーナーブラケット）
+                const is1D = this.scanMode === '1d';
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+                const boxCss = is1D
+                    ? 'position:absolute;left:3%;top:28%;width:94%;height:44%;'
+                    : 'position:absolute;left:5%;top:5%;width:90%;height:90%;';
+                const c = '#00e070';
+                overlay.innerHTML = `
+                    <div style="${boxCss}border:2px solid ${c};border-radius:4px;">
+                        <div style="position:absolute;top:-3px;left:-3px;width:20px;height:20px;border-top:4px solid ${c};border-left:4px solid ${c};border-radius:3px 0 0 0;"></div>
+                        <div style="position:absolute;top:-3px;right:-3px;width:20px;height:20px;border-top:4px solid ${c};border-right:4px solid ${c};border-radius:0 3px 0 0;"></div>
+                        <div style="position:absolute;bottom:-3px;left:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-left:4px solid ${c};border-radius:0 0 0 3px;"></div>
+                        <div style="position:absolute;bottom:-3px;right:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-right:4px solid ${c};border-radius:0 0 3px 0;"></div>
+                    </div>`;
+                container.appendChild(overlay);
+
+                return video;
             },
 
             toggleScanner() {
@@ -1787,30 +1817,32 @@
             },
 
             startScanner() {
+                if (this.scannerActive) return;
                 this.scannerActive = true;
                 const btn = document.getElementById('btn-start-scan');
                 btn.textContent = '📷 カメラを停止';
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const tryStart = (cameraConstraints, scanConfig) => {
-                    this.qrScanner = this._createScanner('qr-reader');
-                    return this.qrScanner.start(
-                        cameraConstraints,
-                        scanConfig,
-                        (decodedText) => this.handleScanResult(decodedText),
-                        () => {}
-                    );
+                const startWith = (constraints) => {
+                    if (this.qrScanner) {
+                        try { this.qrScanner.reset(); } catch(e) {}
+                        this.qrScanner = null;
+                    }
+                    const video = this._setupScannerContainer('qr-reader');
+                    if (!video) return Promise.reject(new Error('no container'));
+                    this.qrScanner = this._createZXingReader(this.scanMode);
+                    return this.qrScanner.decodeFromConstraints(constraints, video, (result) => {
+                        if (result && this.scannerActive) {
+                            this.handleScanResult(result.getText());
+                        }
+                    });
                 };
 
-                // まず高解像度設定で試行し、失敗時にフォールバック
-                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
-                .catch(() => {
-                    console.warn('High-res camera failed, trying basic...');
-                    return tryStart(
-                        { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
-                    );
+                startWith(this._getCameraConstraints())
+                .catch((err) => {
+                    console.warn('High-res camera failed, trying basic...', err);
+                    return startWith({ video: { facingMode: 'environment' } });
                 })
                 .catch(() => {
                     alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
@@ -1823,18 +1855,20 @@
 
             stopScanner() {
                 return new Promise((resolve) => {
-                    if (this.qrScanner && this.scannerActive) {
-                        this.qrScanner.stop().then(() => {
-                            this.scannerActive = false;
-                            const btn = document.getElementById('btn-start-scan');
-                            btn.textContent = '📷 カメラを開始';
-                            btn.classList.add('btn-secondary');
-                            btn.classList.remove('btn-danger');
-                            resolve();
-                        }).catch(() => resolve());
-                    } else {
-                        resolve();
+                    if (this.qrScanner) {
+                        try { this.qrScanner.reset(); } catch(e) {}
+                        this.qrScanner = null;
                     }
+                    this.scannerActive = false;
+                    const btn = document.getElementById('btn-start-scan');
+                    if (btn) {
+                        btn.textContent = '📷 カメラを開始';
+                        btn.classList.add('btn-secondary');
+                        btn.classList.remove('btn-danger');
+                    }
+                    const container = document.getElementById('qr-reader');
+                    if (container) container.innerHTML = '';
+                    resolve();
                 });
             },
 
@@ -2713,23 +2747,33 @@
             },
 
             startInoutScanner() {
+                if (this.inoutScannerActive) return;
                 this.inoutScannerActive = true;
                 const btn = document.getElementById('btn-inout-scan');
                 btn.textContent = '📷 カメラを停止';
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const tryStart = (cam, cfg) => {
-                    this.inoutScanner = this._createScanner('inout-qr-reader');
-                    return this.inoutScanner.start(cam, cfg,
-                        (decodedText) => this.handleInoutScanResult(decodedText), () => {});
+                const startWith = (constraints) => {
+                    if (this.inoutScanner) {
+                        try { this.inoutScanner.reset(); } catch(e) {}
+                        this.inoutScanner = null;
+                    }
+                    const video = this._setupScannerContainer('inout-qr-reader');
+                    if (!video) return Promise.reject(new Error('no container'));
+                    this.inoutScanner = this._createZXingReader(this.scanMode);
+                    return this.inoutScanner.decodeFromConstraints(constraints, video, (result) => {
+                        if (result && this.inoutScannerActive) {
+                            this.handleInoutScanResult(result.getText());
+                        }
+                    });
                 };
 
-                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
-                .catch(() => tryStart(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
-                ))
+                startWith(this._getCameraConstraints())
+                .catch((err) => {
+                    console.warn('Inout camera high-res failed, trying basic...', err);
+                    return startWith({ video: { facingMode: 'environment' } });
+                })
                 .catch(() => {
                     alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
                     this.inoutScannerActive = false;
@@ -2741,16 +2785,20 @@
 
             stopInoutScanner() {
                 return new Promise((resolve) => {
-                    if (this.inoutScanner && this.inoutScannerActive) {
-                        this.inoutScanner.stop().then(() => {
-                            this.inoutScannerActive = false;
-                            const btn = document.getElementById('btn-inout-scan');
-                            btn.textContent = '📷 カメラで読取';
-                            btn.classList.add('btn-secondary');
-                            btn.classList.remove('btn-danger');
-                            resolve();
-                        }).catch(() => resolve());
-                    } else { resolve(); }
+                    if (this.inoutScanner) {
+                        try { this.inoutScanner.reset(); } catch(e) {}
+                        this.inoutScanner = null;
+                    }
+                    this.inoutScannerActive = false;
+                    const btn = document.getElementById('btn-inout-scan');
+                    if (btn) {
+                        btn.textContent = '📷 カメラで読取';
+                        btn.classList.add('btn-secondary');
+                        btn.classList.remove('btn-danger');
+                    }
+                    const container = document.getElementById('inout-qr-reader');
+                    if (container) container.innerHTML = '';
+                    resolve();
                 });
             },
 
@@ -2888,33 +2936,41 @@
             },
 
             startNewItemScanner() {
+                if (this.newItemScannerActive) return;
                 this.newItemScannerActive = true;
                 const btn = document.getElementById('btn-scan-new-item-barcode');
                 btn.textContent = '停止';
                 btn.classList.remove('btn-secondary');
                 btn.classList.add('btn-danger');
 
-                const onDecode = (decodedText) => {
-                    const parsed = this.detectAndParseBarcode(decodedText);
-                    const barcodeVal = (parsed.type === 'gs1' && parsed.data.gtinVariants)
-                        ? parsed.data.gtinVariants[0] : decodedText;
-                    document.getElementById('new-item-barcode').value = barcodeVal;
-                    if (parsed.type === 'gs1' && parsed.data.expiryInput) {
-                        document.getElementById('new-item-expiry').value = parsed.data.expiryInput;
+                const startWith = (constraints) => {
+                    if (this.newItemScanner) {
+                        try { this.newItemScanner.reset(); } catch(e) {}
+                        this.newItemScanner = null;
                     }
-                    this.stopNewItemScanner();
+                    const video = this._setupScannerContainer('new-item-qr-reader');
+                    if (!video) return Promise.reject(new Error('no container'));
+                    this.newItemScanner = this._createZXingReader(this.scanMode);
+                    return this.newItemScanner.decodeFromConstraints(constraints, video, (result) => {
+                        if (result && this.newItemScannerActive) {
+                            const decodedText = result.getText();
+                            const parsed = this.detectAndParseBarcode(decodedText);
+                            const barcodeVal = (parsed.type === 'gs1' && parsed.data.gtinVariants)
+                                ? parsed.data.gtinVariants[0] : decodedText;
+                            document.getElementById('new-item-barcode').value = barcodeVal;
+                            if (parsed.type === 'gs1' && parsed.data.expiryInput) {
+                                document.getElementById('new-item-expiry').value = parsed.data.expiryInput;
+                            }
+                            this.stopNewItemScanner();
+                        }
+                    });
                 };
 
-                const tryStart = (cam, cfg) => {
-                    this.newItemScanner = this._createScanner('new-item-qr-reader');
-                    return this.newItemScanner.start(cam, cfg, onDecode, () => {});
-                };
-
-                tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
-                .catch(() => tryStart(
-                    { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
-                ))
+                startWith(this._getCameraConstraints())
+                .catch((err) => {
+                    console.warn('NewItem camera high-res failed, trying basic...', err);
+                    return startWith({ video: { facingMode: 'environment' } });
+                })
                 .catch(() => {
                     alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
                     this.stopNewItemScanner();
@@ -2923,16 +2979,20 @@
 
             stopNewItemScanner() {
                 return new Promise((resolve) => {
-                    if (this.newItemScanner && this.newItemScannerActive) {
-                        this.newItemScanner.stop().then(() => {
-                            this.newItemScannerActive = false;
-                            const btn = document.getElementById('btn-scan-new-item-barcode');
-                            btn.textContent = '📷 読取';
-                            btn.classList.add('btn-secondary');
-                            btn.classList.remove('btn-danger');
-                            resolve();
-                        }).catch(() => resolve());
-                    } else { resolve(); }
+                    if (this.newItemScanner) {
+                        try { this.newItemScanner.reset(); } catch(e) {}
+                        this.newItemScanner = null;
+                    }
+                    this.newItemScannerActive = false;
+                    const btn = document.getElementById('btn-scan-new-item-barcode');
+                    if (btn) {
+                        btn.textContent = '📷 読取';
+                        btn.classList.add('btn-secondary');
+                        btn.classList.remove('btn-danger');
+                    }
+                    const container = document.getElementById('new-item-qr-reader');
+                    if (container) container.innerHTML = '';
+                    resolve();
                 });
             },
 
