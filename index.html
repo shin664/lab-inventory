@@ -718,6 +718,26 @@
                 --border: #334155;
             }
         }
+
+        /* Print Styles */
+        @media print {
+            body { background: white; color: black; font-size: 11px; }
+            .header, .tab-bar, .filter-tabs, .btn, select, label,
+            #ledger-type-tabs, #btn-ledger-csv, #btn-ledger-print { display: none !important; }
+            .content { padding-bottom: 0 !important; overflow: visible !important; }
+            .page { display: block !important; }
+            .page:not(#page-ledger) { display: none !important; }
+            #page-ledger { display: block !important; }
+            .page-padding { padding: 0 !important; }
+            table { width: 100%; border-collapse: collapse; font-size: 10px; }
+            th, td { border: 1px solid #333; padding: 4px 6px; }
+            th { background-color: #f0f0f0 !important; -webkit-print-color-adjust: exact; }
+            .table-total { background-color: #f0f0f0 !important; -webkit-print-color-adjust: exact; font-weight: bold; }
+            .print-title { text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 8px; }
+            .print-subtitle { text-align: right; font-size: 10px; margin-bottom: 12px; }
+            .table-wrapper { overflow: visible !important; }
+            .ledger-form-group { display: none !important; }
+        }
     </style>
 </head>
 <body>
@@ -860,9 +880,17 @@
                 <div class="page-padding">
                     <div class="form-group">
                         <label>月選択</label>
-                        <select id="ledger-month-select">
-                            <option value="current">当月</option>
-                        </select>
+                        <select id="ledger-month-select"></select>
+                    </div>
+
+                    <div class="filter-tabs" id="ledger-type-tabs" style="margin-bottom: 12px;">
+                        <button class="filter-tab active" data-ledger="summary">台帳（サマリー）</button>
+                        <button class="filter-tab" data-ledger="detail">明細</button>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                        <button class="btn btn-secondary" id="btn-ledger-csv" style="flex: 1;">📥 CSV出力</button>
+                        <button class="btn btn-secondary" id="btn-ledger-print" style="flex: 1;">🖨️ 印刷</button>
                     </div>
 
                     <div id="ledger-content"></div>
@@ -1093,8 +1121,8 @@
                 this.updatePageTitle();
                 this.renderInventory();
                 this.renderHistory();
-                this.renderLedger();
                 this.renderAlerts();
+                // 台帳は台帳タブ表示時に初期化
             },
 
             async initDB() {
@@ -1189,6 +1217,189 @@
                     const request = this.db.transaction(['history']).objectStore('history').getAll();
                     request.onsuccess = () => resolve(request.result.sort((a, b) => new Date(b.date) - new Date(a.date)));
                 });
+            },
+
+            // =============================================
+            // GS1-128 / GS1 DataMatrix / GS1 QR 解析エンジン
+            // =============================================
+
+            parseGS1(rawBarcode) {
+                // シンボロジー識別子を除去（]C1=GS1-128, ]d2=DataMatrix, ]Q3=QR, ]e0=GS1 DataBar）
+                let data = rawBarcode;
+                const prefixes = [']C1', ']c1', ']d2', ']D2', ']Q3', ']q3', ']e0', ']E0', ']J1', ']I1'];
+                for (const p of prefixes) {
+                    if (data.startsWith(p)) { data = data.slice(p.length); break; }
+                }
+
+                // GS1固定長AI定義（AI文字列 → データ桁数）
+                const FIXED = {
+                    '00': 18, // SSCC
+                    '01': 14, // GTIN（医療機器UDI主要AI）
+                    '02': 14, // 収容GTINs
+                    '03': 14,
+                    '04': 18,
+                    '11': 6,  // 製造日 YYMMDD
+                    '12': 6,  // 支払期日
+                    '13': 6,  // 包装日
+                    '15': 6,  // 賞味期限（ベストビフォア）
+                    '16': 6,  // 販売期限
+                    '17': 6,  // 使用期限 YYMMDD（医療機器必須）
+                    '18': 6,  // 収穫日
+                    '19': 6,  // 収穫日
+                    '20': 2,  // バリアント番号
+                    // 計量用（3110〜3699）
+                    '3100': 6, '3101': 6, '3102': 6, '3103': 6, '3104': 6, '3105': 6,
+                    '3110': 6, '3111': 6, '3112': 6, '3113': 6, '3114': 6, '3115': 6,
+                    '3120': 6, '3130': 6, '3140': 6, '3150': 6, '3160': 6,
+                    '3200': 6, '3210': 6, '3220': 6, '3300': 6, '3310': 6,
+                    '3400': 6, '3410': 6, '3500': 6, '3510': 6,
+                    '3600': 6, '3610': 6,
+                };
+
+                // 可変長AIプレフィックス（FNC1か文字列末端で終端）
+                const VARIABLE_PREFIXES = [
+                    '10',  // ロット番号（医療機器必須）
+                    '21',  // シリアル番号（医療機器重要）
+                    '22',  // 消費者製品バリアント
+                    '235', // 第三者認証番号 (UDI-PI)
+                    '240', // 追加製品識別情報
+                    '241', // 顧客部品番号
+                    '242', // 受注メイドバリアント
+                    '243', // PCN
+                    '250', // 第二シリアル番号
+                    '251', // 原産地参照番号
+                    '253', // GDTI
+                    '254', // GLN拡張コンポーネント
+                    '255', // GCN
+                    '30',  // 数量
+                    '37',  // 収容数量
+                    '390', '391', '392', '393', '394', '395', // 支払い金額系
+                    '400', '401', '402', '403',
+                    '410', '411', '412', '413', '414', '415', '416', '417',
+                    '420', '421', '422', '423', '424', '425', '426', '427',
+                    '7001', '7002', '7003', '7004', '7005', '7006', '7007', '7008', '7009', '7010',
+                    '710', '711', '712', '713', '714', '715', // NHRN（医療）
+                    '8001', '8002', '8003', '8004', '8005', '8006', '8007', '8008',
+                    '8009', '8010', '8011', '8012', '8013',
+                    '8017', '8018', '8019', '8020', '8026',
+                    '8110', '8111', '8112',
+                    '90', '91', '92', '93', '94', '95', '96', '97', '98', '99',
+                ];
+
+                const FNC1 = '\x1d'; // グループセパレータ（GS）
+                const result = {};
+                let pos = 0;
+
+                while (pos < data.length) {
+                    if (data[pos] === FNC1) { pos++; continue; }
+
+                    // 4桁 → 3桁 → 2桁 の順でAIを照合
+                    let matched = false;
+                    for (const len of [4, 3, 2]) {
+                        const ai = data.substring(pos, pos + len);
+                        if (pos + len > data.length) continue;
+
+                        if (FIXED[ai] !== undefined) {
+                            const val = data.substring(pos + len, pos + len + FIXED[ai]);
+                            if (val.length === FIXED[ai]) {
+                                result[ai] = val;
+                                pos += len + FIXED[ai];
+                                matched = true;
+                                break;
+                            }
+                        } else if (VARIABLE_PREFIXES.includes(ai)) {
+                            pos += len;
+                            const gsPos = data.indexOf(FNC1, pos);
+                            if (gsPos === -1) {
+                                result[ai] = data.substring(pos);
+                                pos = data.length;
+                            } else {
+                                result[ai] = data.substring(pos, gsPos);
+                                pos = gsPos + 1;
+                            }
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) break; // 解析不能なら終了
+                }
+
+                return Object.keys(result).length > 0 ? result : null;
+            },
+
+            // GS1データから医療情報を抽出
+            extractMedicalGS1(gs1) {
+                const info = { raw: gs1 };
+
+                // GTIN (01) — 主キー
+                if (gs1['01']) {
+                    info.gtin = gs1['01'];
+                    info.gtinVariants = [
+                        gs1['01'],
+                        gs1['01'].replace(/^0+/, ''),
+                        gs1['01'].slice(-13),
+                        gs1['01'].slice(-8),
+                    ].filter((v, i, a) => v && a.indexOf(v) === i);
+                }
+
+                // 使用期限 (17) / 賞味期限 (15)
+                const expiryAI = gs1['17'] || gs1['15'];
+                if (expiryAI) {
+                    info.expiryGS1 = expiryAI; // YYMMDD
+                    info.expiryDisplay = this.gs1DateToDisplay(expiryAI);
+                    info.expiryInput   = this.gs1DateToInput(expiryAI);
+                }
+
+                // 製造日 (11)
+                if (gs1['11']) {
+                    info.prodDate = this.gs1DateToDisplay(gs1['11']);
+                }
+
+                // ロット番号 (10)
+                if (gs1['10']) info.lot = gs1['10'];
+
+                // シリアル番号 (21)
+                if (gs1['21']) info.serial = gs1['21'];
+
+                // NHRN 医療機器固有ID系 (710〜715) — 日本の薬機法コード等
+                const nhrnAIs = ['710','711','712','713','714','715'];
+                nhrnAIs.forEach(ai => { if (gs1[ai]) info['nhrn_' + ai] = gs1[ai]; });
+
+                // 数量 (30)
+                if (gs1['30']) info.quantity = gs1['30'];
+
+                return info;
+            },
+
+            gs1DateToDisplay(yymmdd) {
+                if (!yymmdd || yymmdd.length !== 6) return yymmdd;
+                const yy = parseInt(yymmdd.substring(0, 2));
+                const mm = yymmdd.substring(2, 4);
+                const dd = yymmdd.substring(4, 6);
+                const year = yy >= 50 ? 1900 + yy : 2000 + yy;
+                return dd === '00' ? `${year}/${mm}（月末）` : `${year}/${mm}/${dd}`;
+            },
+
+            gs1DateToInput(yymmdd) {
+                // <input type="date"> 用 YYYY-MM-DD
+                if (!yymmdd || yymmdd.length !== 6) return '';
+                const yy = parseInt(yymmdd.substring(0, 2));
+                const mm = yymmdd.substring(2, 4);
+                const ddStr = yymmdd.substring(4, 6);
+                const year = yy >= 50 ? 1900 + yy : 2000 + yy;
+                const day = ddStr === '00'
+                    ? new Date(year, parseInt(mm), 0).getDate().toString().padStart(2, '0')
+                    : ddStr;
+                return `${year}-${mm}-${day}`;
+            },
+
+            // バーコード文字列をGS1かどうか判定して解析
+            detectAndParseBarcode(raw) {
+                const gs1 = this.parseGS1(raw);
+                if (gs1) {
+                    return { type: 'gs1', data: this.extractMedicalGS1(gs1), raw };
+                }
+                return { type: 'plain', raw };
             },
 
             parseExpiryDate(str) {
@@ -1298,6 +1509,17 @@
 
                 document.getElementById('ledger-month-select').addEventListener('change', () => this.renderLedger());
 
+                document.querySelectorAll('#ledger-type-tabs .filter-tab').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('#ledger-type-tabs .filter-tab').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        this.renderLedger();
+                    });
+                });
+
+                document.getElementById('btn-ledger-csv').addEventListener('click', () => this.exportLedgerCSV());
+                document.getElementById('btn-ledger-print').addEventListener('click', () => window.print());
+
                 // In/Out barcode scanner
                 document.getElementById('btn-inout-scan').addEventListener('click', () => this.toggleInoutScanner());
                 document.getElementById('btn-inout-barcode-search').addEventListener('click', () => this.handleInoutBarcodeLookup());
@@ -1320,6 +1542,11 @@
 
                 this.currentTab = tabName;
                 this.updatePageTitle();
+
+                if (tabName === 'ledger') {
+                    this.initLedgerMonthSelect();
+                    this.renderLedger();
+                }
             },
 
             updatePageTitle() {
@@ -1382,19 +1609,79 @@
             },
 
             async handleManualBarcodeLookup() {
-                const barcode = document.getElementById('manual-barcode-input').value.trim();
-                if (!barcode) return;
+                const raw = document.getElementById('manual-barcode-input').value.trim();
+                if (!raw) return;
 
-                let item = await this.getItemByBarcode(barcode);
-                if (!item) {
-                    item = await this.getItemByCode(barcode);
+                const parsed = this.detectAndParseBarcode(raw);
+                const container = document.getElementById('scan-result-container');
+
+                // 検索キー候補を作成（GS1ならGTIN各バリアント、平文なら生文字列）
+                const searchKeys = parsed.type === 'gs1' && parsed.data.gtinVariants
+                    ? parsed.data.gtinVariants
+                    : [raw];
+
+                let item = null;
+                for (const key of searchKeys) {
+                    item = await this.getItemByBarcode(key);
+                    if (!item) item = await this.getItemByCode(key);
+                    if (item) break;
                 }
 
-                const container = document.getElementById('scan-result-container');
+                // GS1バッジHTML
+                const gs1Badge = parsed.type === 'gs1'
+                    ? `<div style="margin-bottom:8px;">
+                        <span class="badge badge-info">GS1解析済</span>
+                        ${parsed.data.gtin ? `<span style="font-size:12px;margin-left:6px;color:var(--text-light);">GTIN: ${parsed.data.gtin}</span>` : ''}
+                       </div>`
+                    : '';
+
+                // GS1追加情報HTML
+                let gs1ExtraHtml = '';
+                if (parsed.type === 'gs1') {
+                    const d = parsed.data;
+                    if (d.expiryDisplay) gs1ExtraHtml += `
+                        <div class="card-row">
+                            <span class="card-label">🗓 使用期限（GS1）</span>
+                            <span class="card-value expiry-ok">${d.expiryDisplay}</span>
+                        </div>`;
+                    if (d.lot) gs1ExtraHtml += `
+                        <div class="card-row">
+                            <span class="card-label">🏷 ロット番号</span>
+                            <span class="card-value">${d.lot}</span>
+                        </div>`;
+                    if (d.serial) gs1ExtraHtml += `
+                        <div class="card-row">
+                            <span class="card-label">🔢 シリアル番号</span>
+                            <span class="card-value">${d.serial}</span>
+                        </div>`;
+                    if (d.prodDate) gs1ExtraHtml += `
+                        <div class="card-row">
+                            <span class="card-label">🏭 製造日</span>
+                            <span class="card-value">${d.prodDate}</span>
+                        </div>`;
+                    // NHRN
+                    const nhrnLabels = {'710':'DE NHRN','711':'FR NHRN','712':'ES NHRN','713':'BR NHRN','714':'PT NHRN','715':'US NHRN'};
+                    Object.entries(nhrnLabels).forEach(([ai, label]) => {
+                        if (d['nhrn_' + ai]) gs1ExtraHtml += `
+                            <div class="card-row">
+                                <span class="card-label">${label}</span>
+                                <span class="card-value">${d['nhrn_' + ai]}</span>
+                            </div>`;
+                    });
+                }
+
                 if (item) {
                     const expiryStatus = this.getExpiryStatus(item.expiry);
+                    // GS1で期限情報があれば今回スキャン分の期限も表示
+                    const scannedExpiryHtml = (parsed.type === 'gs1' && parsed.data.expiryDisplay)
+                        ? `<div class="card-row">
+                            <span class="card-label">📦 スキャン使用期限</span>
+                            <span class="card-value expiry-ok">${parsed.data.expiryDisplay}</span>
+                           </div>`
+                        : '';
                     container.innerHTML = `
                         <div class="card">
+                            ${gs1Badge}
                             <div class="card-title">${item.name}</div>
                             <div class="card-row">
                                 <span class="card-label">メーカー</span>
@@ -1405,18 +1692,32 @@
                                 <span class="card-value">${item.spec}</span>
                             </div>
                             <div class="card-row">
-                                <span class="card-label">在庫数</span>
+                                <span class="card-label">現在在庫数</span>
                                 <span class="card-value">${item.stock}</span>
                             </div>
                             <div class="card-row">
-                                <span class="card-label">使用期限</span>
+                                <span class="card-label">登録済使用期限</span>
                                 <span class="card-value ${expiryStatus.class}">${expiryStatus.text}</span>
                             </div>
-                            <button class="btn btn-primary btn-block mt-4" onclick="app.openItemDetail(${item.id})">詳細を見る</button>
+                            ${gs1ExtraHtml}
+                            <div class="btn-group">
+                                <button class="btn btn-success" onclick="app.quickInstockWithGS1(${item.id}, ${JSON.stringify(parsed.type === 'gs1' ? parsed.data : {}).replace(/"/g, '&quot;')})">入庫</button>
+                                <button class="btn btn-primary" onclick="app.quickOutstockWithGS1(${item.id}, ${JSON.stringify(parsed.type === 'gs1' ? parsed.data : {}).replace(/"/g, '&quot;')})">出庫</button>
+                                <button class="btn btn-secondary" onclick="app.openItemDetail(${item.id})">詳細</button>
+                            </div>
                         </div>
                     `;
                 } else {
-                    container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">❌</div><p>該当する物品が見つかりません</p><button class="btn btn-success mt-4" onclick="app.openNewItemModalWithBarcode('${barcode}')">＋ この物品を新規登録</button></div>`;
+                    // 物品未登録の場合、GS1情報をプレフィルして新規登録モーダルへ
+                    const gs1Info = parsed.type === 'gs1' ? parsed.data : {};
+                    const preGtin = gs1Info.gtinVariants ? gs1Info.gtinVariants[0] : raw;
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">❌</div>
+                            <p>該当する物品が見つかりません</p>
+                            ${parsed.type === 'gs1' ? `<p style="font-size:12px;color:var(--text-light);margin-top:4px;">GTIN: ${gs1Info.gtin || raw}</p>` : ''}
+                            <button class="btn btn-success mt-4" onclick="app.openNewItemModalWithGS1(${JSON.stringify(gs1Info).replace(/"/g, '&quot;')})">＋ この物品を新規登録</button>
+                        </div>`;
                 }
             },
 
@@ -1795,35 +2096,55 @@
                 link.click();
             },
 
+            initLedgerMonthSelect() {
+                const selector = document.getElementById('ledger-month-select');
+                if (selector.children.length > 0) return;
+                const currentDate = new Date();
+                // デフォルトは前月
+                for (let i = 1; i <= 13; i++) {
+                    const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+                    const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                    const option = document.createElement('option');
+                    option.value = monthStr;
+                    option.textContent = `${date.getFullYear()}年${date.getMonth() + 1}月`;
+                    if (i === 1) option.selected = true;
+                    selector.appendChild(option);
+                }
+                // 当月も追加
+                const nowStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+                const nowOpt = document.createElement('option');
+                nowOpt.value = nowStr;
+                nowOpt.textContent = `${currentDate.getFullYear()}年${currentDate.getMonth() + 1}月（当月）`;
+                selector.insertBefore(nowOpt, selector.firstChild);
+            },
+
             async renderLedger() {
+                this.initLedgerMonthSelect();
                 const selector = document.getElementById('ledger-month-select');
                 const selectedMonth = selector.value;
+                const [year, month] = selectedMonth.split('-').map(Number);
 
-                if (selector.children.length === 1) {
-                    const currentDate = new Date();
-                    for (let i = 0; i < 12; i++) {
-                        const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-                        const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                        const option = document.createElement('option');
-                        option.value = monthStr;
-                        option.textContent = `${date.getFullYear()}年${date.getMonth() + 1}月`;
-                        if (i === 0) option.selected = true;
-                        selector.appendChild(option);
-                    }
+                const activeTab = document.querySelector('#ledger-type-tabs .filter-tab.active');
+                const ledgerType = activeTab ? activeTab.dataset.ledger : 'summary';
+
+                if (ledgerType === 'summary') {
+                    await this.renderLedgerSummary(year, month);
+                } else {
+                    await this.renderLedgerDetail(year, month);
                 }
+            },
 
-                const [year, month] = (selectedMonth === 'current' ?
-                    new Date().toISOString().split('T')[0].split('-').slice(0, 2) :
-                    selectedMonth.split('-')).map(Number);
-
+            async renderLedgerSummary(year, month) {
                 const items = await this.getAllItems();
                 const allHistory = await this.getAllHistory();
+                const container = document.getElementById('ledger-content');
 
                 const monthHistory = allHistory.filter(record => {
-                    const recordDate = new Date(record.date);
-                    return recordDate.getFullYear() === year && (recordDate.getMonth() + 1) === month;
+                    const d = new Date(record.date);
+                    return d.getFullYear() === year && (d.getMonth() + 1) === month;
                 });
 
+                // 全品目をマップに入れる（在庫数は現在値）
                 const ledgerMap = {};
                 items.forEach(item => {
                     ledgerMap[item.id] = {
@@ -1845,31 +2166,24 @@
                     }
                 });
 
-                const ledgerData = Object.values(ledgerMap).filter(item => item.inCount > 0 || item.outCount > 0 || item.stock > 0);
-                const container = document.getElementById('ledger-content');
-
-                if (ledgerData.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📊</div><p>該当するデータがありません</p></div>';
-                    return;
-                }
-
+                // 全品目を表示（入出庫がなくても含む）
+                const ledgerData = Object.values(ledgerMap);
                 let totalIn = 0, totalOut = 0;
-                ledgerData.forEach(item => {
-                    totalIn += item.inCount;
-                    totalOut += item.outCount;
-                });
+                ledgerData.forEach(item => { totalIn += item.inCount; totalOut += item.outCount; });
 
-                const tableHtml = `
-                    <h3 style="margin-bottom: 16px; text-align: center;">${year}年${month}月試薬管理台帳</h3>
+                const printDate = new Date().toLocaleDateString('ja-JP');
+                container.innerHTML = `
+                    <div class="print-title">${year}年${month}月 試薬管理台帳</div>
+                    <div class="print-subtitle">出力日: ${printDate}</div>
                     <div class="table-wrapper">
                         <table>
                             <thead>
                                 <tr>
-                                    <th>コード</th>
-                                    <th>物品名</th>
-                                    <th>在庫数</th>
-                                    <th>入庫数</th>
-                                    <th>出庫数</th>
+                                    <th style="min-width:70px;">コード</th>
+                                    <th style="min-width:120px;">物品名</th>
+                                    <th style="text-align:center;">在庫数</th>
+                                    <th style="text-align:center;">入庫数</th>
+                                    <th style="text-align:center;">出庫数</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1877,23 +2191,181 @@
                                     <tr>
                                         <td>${item.code}</td>
                                         <td>${item.name}</td>
-                                        <td>${item.stock}</td>
-                                        <td>${item.inCount}</td>
-                                        <td>${item.outCount}</td>
+                                        <td style="text-align:center;">${item.stock}</td>
+                                        <td style="text-align:center;">${item.inCount > 0 ? item.inCount : ''}</td>
+                                        <td style="text-align:center;">${item.outCount > 0 ? item.outCount : ''}</td>
                                     </tr>
                                 `).join('')}
                                 <tr class="table-total">
-                                    <td colspan="2">合計</td>
-                                    <td>-</td>
-                                    <td>${totalIn}</td>
-                                    <td>${totalOut}</td>
+                                    <td colspan="2">合　計</td>
+                                    <td style="text-align:center;">-</td>
+                                    <td style="text-align:center;">${totalIn}</td>
+                                    <td style="text-align:center;">${totalOut}</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
+                    <div style="margin-top: 32px; display: flex; justify-content: flex-end; gap: 32px; font-size: 13px;">
+                        <span>確認者: _______________</span>
+                        <span>担当者: _______________</span>
+                    </div>
                 `;
+            },
 
-                container.innerHTML = tableHtml;
+            async renderLedgerDetail(year, month) {
+                const allHistory = await this.getAllHistory();
+                const container = document.getElementById('ledger-content');
+
+                const monthHistory = allHistory.filter(record => {
+                    const d = new Date(record.date);
+                    return d.getFullYear() === year && (d.getMonth() + 1) === month;
+                });
+
+                if (monthHistory.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><p>この月の入出庫データがありません</p></div>';
+                    return;
+                }
+
+                // コードでソート、同コードは日付順
+                const sorted = [...monthHistory].sort((a, b) => {
+                    if (a.itemCode < b.itemCode) return -1;
+                    if (a.itemCode > b.itemCode) return 1;
+                    return new Date(a.date) - new Date(b.date);
+                });
+
+                const printDate = new Date().toLocaleDateString('ja-JP');
+                container.innerHTML = `
+                    <div class="print-title">${year}年${month}月 試薬管理台帳（明細）</div>
+                    <div class="print-subtitle">出力日: ${printDate}</div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="min-width:65px;">コード</th>
+                                    <th style="min-width:110px;">物品名</th>
+                                    <th style="min-width:70px;">使用期限</th>
+                                    <th style="min-width:80px;">ロット番号</th>
+                                    <th style="text-align:center;">区分</th>
+                                    <th style="min-width:70px;">日付</th>
+                                    <th style="text-align:center;">数量</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${sorted.map(record => {
+                                    const expDisplay = record.expiryDate
+                                        ? record.expiryDate.replace(/-/g, '/')
+                                        : '';
+                                    const typeClass = record.type === '入庫'
+                                        ? 'color:#16a34a;font-weight:600;'
+                                        : 'color:#dc2626;font-weight:600;';
+                                    return `
+                                        <tr>
+                                            <td>${record.itemCode || ''}</td>
+                                            <td>${record.itemName}</td>
+                                            <td>${expDisplay}</td>
+                                            <td>${record.lotNumber || ''}</td>
+                                            <td style="text-align:center;${typeClass}">${record.type}</td>
+                                            <td>${record.date}</td>
+                                            <td style="text-align:center;">${record.quantity}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top: 16px; font-size: 12px; color: var(--text-light);">
+                        合計 ${monthHistory.filter(r=>r.type==='入庫').reduce((s,r)=>s+r.quantity,0)} 入庫 /
+                        ${monthHistory.filter(r=>r.type==='出庫').reduce((s,r)=>s+r.quantity,0)} 出庫（${sorted.length}件）
+                    </div>
+                `;
+            },
+
+            async exportLedgerCSV() {
+                this.initLedgerMonthSelect();
+                const selector = document.getElementById('ledger-month-select');
+                const selectedMonth = selector.value;
+                const [year, month] = selectedMonth.split('-').map(Number);
+
+                const activeTab = document.querySelector('#ledger-type-tabs .filter-tab.active');
+                const ledgerType = activeTab ? activeTab.dataset.ledger : 'summary';
+
+                if (ledgerType === 'summary') {
+                    await this.exportLedgerSummaryCSV(year, month);
+                } else {
+                    await this.exportLedgerDetailCSV(year, month);
+                }
+            },
+
+            async exportLedgerSummaryCSV(year, month) {
+                const items = await this.getAllItems();
+                const allHistory = await this.getAllHistory();
+
+                const monthHistory = allHistory.filter(record => {
+                    const d = new Date(record.date);
+                    return d.getFullYear() === year && (d.getMonth() + 1) === month;
+                });
+
+                const ledgerMap = {};
+                items.forEach(item => {
+                    ledgerMap[item.id] = { code: item.code, name: item.name, stock: item.stock, inCount: 0, outCount: 0 };
+                });
+                monthHistory.forEach(record => {
+                    if (ledgerMap[record.itemId]) {
+                        if (record.type === '入庫') ledgerMap[record.itemId].inCount += record.quantity;
+                        else ledgerMap[record.itemId].outCount += record.quantity;
+                    }
+                });
+
+                const headers = ['コード', '物品名', '在庫数', '入庫数', '出庫数'];
+                const rows = [headers.join(',')];
+                Object.values(ledgerMap).forEach(item => {
+                    rows.push([item.code, `"${item.name}"`, item.stock, item.inCount, item.outCount].join(','));
+                });
+
+                const totalIn = Object.values(ledgerMap).reduce((s,i)=>s+i.inCount,0);
+                const totalOut = Object.values(ledgerMap).reduce((s,i)=>s+i.outCount,0);
+                rows.push(['"合計"', '', '-', totalIn, totalOut].join(','));
+
+                this.downloadCSV(rows.join('\n'), `${year}${String(month).padStart(2,'0')}台帳.csv`);
+            },
+
+            async exportLedgerDetailCSV(year, month) {
+                const allHistory = await this.getAllHistory();
+                const monthHistory = allHistory.filter(record => {
+                    const d = new Date(record.date);
+                    return d.getFullYear() === year && (d.getMonth() + 1) === month;
+                });
+
+                const sorted = [...monthHistory].sort((a, b) => {
+                    if (a.itemCode < b.itemCode) return -1;
+                    if (a.itemCode > b.itemCode) return 1;
+                    return new Date(a.date) - new Date(b.date);
+                });
+
+                const headers = ['コード', '物品名', '使用期限', 'ロット番号', '入庫/出庫', '入出庫日', '数量'];
+                const rows = [headers.join(',')];
+                sorted.forEach(record => {
+                    rows.push([
+                        record.itemCode || '',
+                        `"${record.itemName}"`,
+                        record.expiryDate || '',
+                        record.lotNumber || '',
+                        record.type,
+                        record.date,
+                        record.quantity
+                    ].join(','));
+                });
+
+                this.downloadCSV(rows.join('\n'), `${year}${String(month).padStart(2,'0')}台帳(明細).csv`);
+            },
+
+            downloadCSV(content, filename) {
+                const csv = '\ufeff' + content;
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.setAttribute('href', URL.createObjectURL(blob));
+                link.setAttribute('download', filename);
+                link.click();
             },
 
             async renderAlerts() {
@@ -2031,27 +2503,86 @@
             },
 
             async handleInoutBarcodeLookup() {
-                const barcode = document.getElementById('inout-barcode-input').value.trim();
-                if (!barcode) return;
+                const raw = document.getElementById('inout-barcode-input').value.trim();
+                if (!raw) return;
 
-                let item = await this.getItemByBarcode(barcode);
-                if (!item) {
-                    item = await this.getItemByCode(barcode);
+                const parsed = this.detectAndParseBarcode(raw);
+                const searchKeys = parsed.type === 'gs1' && parsed.data.gtinVariants
+                    ? parsed.data.gtinVariants
+                    : [raw];
+
+                let item = null;
+                for (const key of searchKeys) {
+                    item = await this.getItemByBarcode(key);
+                    if (!item) item = await this.getItemByCode(key);
+                    if (item) break;
                 }
 
                 const msgContainer = document.getElementById('inout-barcode-message');
                 if (item) {
-                    msgContainer.innerHTML = `<div class="badge badge-success" style="display: inline-block;">✓ ${item.name} を選択しました</div>`;
+                    const gs1Label = parsed.type === 'gs1'
+                        ? ` <span class="badge badge-info" style="margin-left:6px;">GS1解析済</span>` : '';
+                    msgContainer.innerHTML = `<div class="badge badge-success" style="display:inline-block;">✓ ${item.name} を選択${gs1Label}</div>`;
+
                     this.selectedItem = item;
+                    this.lastGS1Data = parsed.type === 'gs1' ? parsed.data : null;
+
                     document.getElementById('inout-item-search').value = item.name;
                     document.getElementById('inout-item-suggestions').innerHTML = '';
                     this.displayInoutForm();
+
+                    // GS1データで使用期限・ロット番号を自動入力
+                    if (parsed.type === 'gs1' && parsed.data) {
+                        const d = parsed.data;
+                        if (d.expiryInput) {
+                            document.getElementById('inout-expiry-date').value = d.expiryInput;
+                        }
+                        if (d.lot) {
+                            document.getElementById('inout-lot-number').value = d.lot;
+                        }
+                    }
                 } else {
-                    msgContainer.innerHTML = `<div style="margin-top: 8px;"><div class="badge badge-danger" style="display: inline-block;">該当する物品が見つかりません</div><br><button class="btn btn-success mt-4" style="margin-top: 8px;" onclick="app.openNewItemModalWithBarcode('${barcode}')">＋ この物品を新規登録</button></div>`;
+                    const gs1Info = parsed.type === 'gs1' ? parsed.data : {};
+                    msgContainer.innerHTML = `
+                        <div style="margin-top:8px;">
+                            <div class="badge badge-danger" style="display:inline-block;">該当する物品が見つかりません</div>
+                            ${parsed.type === 'gs1' ? `<div style="font-size:12px;color:var(--text-light);margin-top:4px;">GTIN: ${gs1Info.gtin || raw}</div>` : ''}
+                            <br>
+                            <button class="btn btn-success" style="margin-top:8px;" onclick="app.openNewItemModalWithGS1(${JSON.stringify(gs1Info).replace(/"/g, '&quot;')})">＋ この物品を新規登録</button>
+                        </div>`;
                 }
             },
 
             // === New Item Registration ===
+            async quickInstockWithGS1(itemId, gs1Data) {
+                this.closeModal();
+                this.switchTab('inout');
+                this.setInoutMode('in');
+                const req = this.db.transaction(['items']).objectStore('items').get(itemId);
+                req.onsuccess = () => {
+                    this.selectedItem = req.result;
+                    this.displayInoutForm();
+                    // GS1データを自動入力
+                    if (gs1Data && gs1Data.expiryInput) {
+                        document.getElementById('inout-expiry-date').value = gs1Data.expiryInput;
+                    }
+                    if (gs1Data && gs1Data.lot) {
+                        document.getElementById('inout-lot-number').value = gs1Data.lot;
+                    }
+                };
+            },
+
+            async quickOutstockWithGS1(itemId, gs1Data) {
+                this.closeModal();
+                this.switchTab('inout');
+                this.setInoutMode('out');
+                const req = this.db.transaction(['items']).objectStore('items').get(itemId);
+                req.onsuccess = () => {
+                    this.selectedItem = req.result;
+                    this.displayInoutForm();
+                };
+            },
+
             openNewItemModal() {
                 document.getElementById('new-item-form').reset();
                 document.getElementById('new-item-modal').classList.add('active');
@@ -2060,6 +2591,17 @@
             openNewItemModalWithBarcode(barcode) {
                 document.getElementById('new-item-form').reset();
                 document.getElementById('new-item-barcode').value = barcode;
+                document.getElementById('new-item-modal').classList.add('active');
+            },
+
+            openNewItemModalWithGS1(gs1Data) {
+                document.getElementById('new-item-form').reset();
+                if (gs1Data && gs1Data.gtinVariants && gs1Data.gtinVariants.length > 0) {
+                    document.getElementById('new-item-barcode').value = gs1Data.gtinVariants[0];
+                }
+                if (gs1Data && gs1Data.expiryInput) {
+                    document.getElementById('new-item-expiry').value = gs1Data.expiryInput;
+                }
                 document.getElementById('new-item-modal').classList.add('active');
             },
 
