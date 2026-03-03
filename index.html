@@ -1308,6 +1308,28 @@
                     if (data.startsWith(p)) { data = data.slice(p.length); break; }
                 }
 
+                // 人間可読形式 (AI)data... を優先的に処理
+                // 例: (01)12345678901234(17)250228(10)LOT123
+                if (/\(\d{2,4}\)/.test(data)) {
+                    const hrResult = {};
+                    const regex = /\((\d{2,4})\)/g;
+                    let m;
+                    const positions = [];
+                    while ((m = regex.exec(data)) !== null) {
+                        positions.push({ ai: m[1], matchStart: m.index, dataStart: m.index + m[0].length });
+                    }
+                    for (let i = 0; i < positions.length; i++) {
+                        const { ai, dataStart } = positions[i];
+                        const valEnd = i + 1 < positions.length ? positions[i + 1].matchStart : data.length;
+                        hrResult[ai] = data.substring(dataStart, valEnd);
+                    }
+                    if (Object.keys(hrResult).length > 0) return hrResult;
+                }
+
+                // FNC1文字の正規化
+                // ZXingは\x1d(ASCII 29)を使用, 一部の実装では\x1e(30), \x1c(28), \x04を使う場合がある
+                data = data.replace(/[\x1e\x1c\x04]/g, '\x1d');
+
                 // GS1固定長AI定義（AI文字列 → データ桁数）
                 const FIXED = {
                     '00': 18, // SSCC
@@ -1472,11 +1494,36 @@
 
             // バーコード文字列をGS1かどうか判定して解析
             detectAndParseBarcode(raw) {
-                const gs1 = this.parseGS1(raw);
-                if (gs1) {
-                    return { type: 'gs1', data: this.extractMedicalGS1(gs1), raw };
+                // GS1らしさの事前チェック（ヒューリスティック）
+                const hasGS1Sep  = /[\x1d\x1e\x1c\x04]/.test(raw);          // FNC1系文字を含む
+                const hasSymId   = /^\](C1|c1|d2|D2|Q3|q3|e0|E0|J1|I1)/.test(raw); // シンボロジーID
+                const hasHumanRd = /\(\d{2,4}\)/.test(raw);                  // (AI)data 形式
+                // 先頭が 01 か 00 で後続が14桁の数字（典型的GS1-128先頭AI）
+                const looksGS1   = /^(01|00)\d{14}/.test(raw);
+
+                if (hasGS1Sep || hasSymId || hasHumanRd || looksGS1) {
+                    const gs1 = this.parseGS1(raw);
+                    if (gs1) {
+                        return { type: 'gs1', data: this.extractMedicalGS1(gs1), raw };
+                    }
+                }
+                // フォールバック: 常にGS1解析を試みる（ヒューリスティックを外れたケース）
+                const gs1fb = this.parseGS1(raw);
+                if (gs1fb) {
+                    return { type: 'gs1', data: this.extractMedicalGS1(gs1fb), raw };
                 }
                 return { type: 'plain', raw };
+            },
+
+            // 生バーコード文字列を可視化（制御文字を [xNN] 形式で表示）
+            _hexDump(str) {
+                return Array.from(str).map(c => {
+                    const code = c.charCodeAt(0);
+                    if (code < 32 || code > 126) {
+                        return `<span style="color:#c0392b;font-weight:bold;">[x${code.toString(16).padStart(2,'0')}]</span>`;
+                    }
+                    return c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                }).join('');
             },
 
             parseExpiryDate(str) {
@@ -1669,7 +1716,7 @@
                         if (is1D) {
                             // GS1-128等の横長バーコード: 幅最大・高さ最小限
                             const w = Math.floor(viewfinderWidth * 0.92);
-                            const h = Math.max(120, Math.floor(viewfinderHeight * 0.28));
+                            const h = Math.max(150, Math.floor(viewfinderHeight * 0.30));
                             return { width: w, height: h };
                         } else {
                             // QR/DataMatrix: 正方形で最大化
@@ -1762,7 +1809,7 @@
                     console.warn('High-res camera failed, trying basic...');
                     return tryStart(
                         { facingMode: 'environment' },
-                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                        { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
                     );
                 })
                 .catch(() => {
@@ -1815,6 +1862,16 @@
                     if (!item) item = await this.getItemByCode(key);
                     if (item) break;
                 }
+
+                // デバッグパネル（RAWバーコード表示）
+                const debugHtml = `<details style="margin-bottom:8px;font-size:11px;">
+                    <summary style="cursor:pointer;color:var(--text-light);user-select:none;">🔍 RAW（デバッグ）</summary>
+                    <div style="margin-top:4px;padding:6px;background:#f8f8f8;border-radius:4px;word-break:break-all;font-family:monospace;font-size:11px;line-height:1.6;">
+                        <div><b>長さ:</b> ${raw.length}文字</div>
+                        <div><b>内容:</b> ${this._hexDump(raw)}</div>
+                        <div><b>種別:</b> ${parsed.type === 'gs1' ? 'GS1解析済' : '平文'}</div>
+                    </div>
+                </details>`;
 
                 // GS1バッジHTML
                 const gs1Badge = parsed.type === 'gs1'
@@ -1869,6 +1926,7 @@
                            </div>`
                         : '';
                     container.innerHTML = `
+                        ${debugHtml}
                         <div class="card">
                             ${gs1Badge}
                             <div class="card-title">${item.name}</div>
@@ -1901,6 +1959,7 @@
                     const gs1Info = parsed.type === 'gs1' ? parsed.data : {};
                     const preGtin = gs1Info.gtinVariants ? gs1Info.gtinVariants[0] : raw;
                     container.innerHTML = `
+                        ${debugHtml}
                         <div class="empty-state">
                             <div class="empty-state-icon">❌</div>
                             <p>該当する物品が見つかりません</p>
@@ -2669,7 +2728,7 @@
                 tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
                 .catch(() => tryStart(
                     { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
                 ))
                 .catch(() => {
                     alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
@@ -2718,10 +2777,19 @@
                 }
 
                 const msgContainer = document.getElementById('inout-barcode-message');
+                // デバッグパネル（RAWバーコード）
+                const inoutDebugHtml = `<details style="margin-bottom:6px;font-size:11px;">
+                    <summary style="cursor:pointer;color:var(--text-light);user-select:none;">🔍 RAW（デバッグ）</summary>
+                    <div style="margin-top:4px;padding:6px;background:#f8f8f8;border-radius:4px;word-break:break-all;font-family:monospace;font-size:11px;line-height:1.6;">
+                        <div><b>長さ:</b> ${raw.length}文字</div>
+                        <div><b>内容:</b> ${this._hexDump(raw)}</div>
+                        <div><b>種別:</b> ${parsed.type === 'gs1' ? 'GS1解析済' : '平文'}</div>
+                    </div>
+                </details>`;
                 if (item) {
                     const gs1Label = parsed.type === 'gs1'
                         ? ` <span class="badge badge-info" style="margin-left:6px;">GS1解析済</span>` : '';
-                    msgContainer.innerHTML = `<div class="badge badge-success" style="display:inline-block;">✓ ${item.name} を選択${gs1Label}</div>`;
+                    msgContainer.innerHTML = inoutDebugHtml + `<div class="badge badge-success" style="display:inline-block;">✓ ${item.name} を選択${gs1Label}</div>`;
 
                     this.selectedItem = item;
                     this.lastGS1Data = parsed.type === 'gs1' ? parsed.data : null;
@@ -2742,7 +2810,7 @@
                     }
                 } else {
                     const gs1Info = parsed.type === 'gs1' ? parsed.data : {};
-                    msgContainer.innerHTML = `
+                    msgContainer.innerHTML = inoutDebugHtml + `
                         <div style="margin-top:8px;">
                             <div class="badge badge-danger" style="display:inline-block;">該当する物品が見つかりません</div>
                             ${parsed.type === 'gs1' ? `<div style="font-size:12px;color:var(--text-light);margin-top:4px;">GTIN: ${gs1Info.gtin || raw}</div>` : ''}
@@ -2845,7 +2913,7 @@
                 tryStart(this._getCameraConstraints(), this._getScanConfig(this.scanMode))
                 .catch(() => tryStart(
                     { facingMode: 'environment' },
-                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 130 : 300 } }
+                    { fps: 10, qrbox: { width: 300, height: this.scanMode === '1d' ? 150 : 300 } }
                 ))
                 .catch(() => {
                     alert('カメラへのアクセスに失敗しました。\nブラウザのカメラ許可設定をご確認ください。');
