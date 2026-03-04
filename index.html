@@ -379,6 +379,29 @@ body { font-family:-apple-system,'Hiragino Sans','SF Pro Display',sans-serif; ba
 </div>
 </div>
 
+<!-- HTTPS Guide Panel -->
+<div id="https-guide" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1a1d27;border:1px solid #2e3248;border-radius:16px;padding:24px;max-width:400px;width:100%;">
+    <div style="font-size:20px;font-weight:700;margin-bottom:4px;">📱 iPhoneで使う方法</div>
+    <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">カメラを使うにはHTTPS環境が必要です</div>
+    <div style="background:#0f1117;border-radius:10px;padding:16px;margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:700;color:#06b6d4;margin-bottom:8px;">① 推奨：同じWi-Fiで簡単サーバー起動</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">このHTMLファイルをMacのターミナルで下記を実行</div>
+      <code style="display:block;background:#0d1117;padding:10px;border-radius:6px;font-size:12px;color:#22c55e;word-break:break-all;">cd ~/Downloads<br>python3 -m http.server 8080</code>
+      <div style="font-size:12px;color:#94a3b8;margin-top:8px;">iPhoneブラウザで <code style="color:#3b82f6;">http://（MacのIPアドレス）:8080</code> を開く</div>
+    </div>
+    <div style="background:#0f1117;border-radius:10px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:#06b6d4;margin-bottom:8px;">② 簡単：ngrokで即座にHTTPS化</div>
+      <code style="display:block;background:#0d1117;padding:10px;border-radius:6px;font-size:12px;color:#22c55e;">ngrok http 8080</code>
+      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">表示されたhttps://…URLをiPhoneで開く</div>
+    </div>
+    <div style="background:#1e3a5f;border-radius:8px;padding:10px;font-size:12px;color:#93c5fd;margin-bottom:16px;">
+      💡 現在のPC（このブラウザ）では手動入力ボタン（✏️）でバーコード番号を直接入力できます
+    </div>
+    <button onclick="document.getElementById('https-guide').style.display='none'" style="width:100%;padding:12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">閉じる</button>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script>
@@ -530,35 +553,74 @@ async function startScannerEngine() {
   const statusEl = document.getElementById('scan-status');
   statusEl.textContent = 'カメラを起動中...';
 
+  // Check camera API availability
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const proto = location.protocol;
+    let msg = 'カメラAPIが使用できません。';
+    if(proto === 'file:') {
+      msg = '⚠️ ローカルファイルではカメラが使えません。下の手順でHTTPS環境で開いてください。';
+      showHttpsGuide();
+    } else if(proto !== 'https:') {
+      msg = 'カメラにはHTTPS接続が必要です。';
+    }
+    statusEl.textContent = msg;
+    toast(msg, 'error');
+    return;
+  }
+
   try {
-    const constraints = {
-      video: {
-        facingMode: { exact: 'environment' },
-        width:  { ideal: 3840, min: 1280 },
-        height: { ideal: 2160, min: 720 },
-        frameRate: { ideal: 30, min: 15 },
-        advanced: [
-          { focusMode: 'continuous' },
-          { exposureMode: 'continuous' },
-          { whiteBalanceMode: 'continuous' },
-          { zoom: 1 }
-        ]
+    // Progressive fallback: most restrictive → least restrictive
+    // NOTE: "advanced" is NOT allowed in getUserMedia — use applyConstraints after stream is obtained
+    const tryList = [
+      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } },
+      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+      { video: { facingMode: 'environment' } },
+      { video: true }
+    ];
+
+    let stream = null, lastErr = null;
+    for(const c of tryList) {
+      try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
+      catch(e) { lastErr = e; console.warn('getUserMedia failed:', c, e.name, e.message); }
+    }
+
+    if(!stream) {
+      let msg = 'カメラを起動できませんでした';
+      if(lastErr) {
+        if(lastErr.name === 'NotAllowedError' || lastErr.name === 'PermissionDeniedError') {
+          msg = '📵 カメラのアクセスが拒否されました。ブラウザのアドレスバー横のカメラアイコンから許可してください。';
+        } else if(lastErr.name === 'NotFoundError' || lastErr.name === 'DevicesNotFoundError') {
+          msg = '📷 カメラが見つかりません。カメラが接続されているか確認してください。';
+        } else if(lastErr.name === 'NotSupportedError' || lastErr.name === 'TypeError') {
+          msg = '⚠️ このブラウザではカメラが使用できません。ChromeまたはSafariをお試しください。';
+          if(location.protocol === 'file:') { msg += ' ※ローカルファイルはHTTPS環境が必要です。'; showHttpsGuide(); }
+        } else if(lastErr.name === 'OverconstrainedError') {
+          msg = '📷 カメラの設定に問題があります。別のブラウザをお試しください。';
+        } else {
+          msg = 'カメラエラー: ' + lastErr.name + ' — ' + lastErr.message;
+        }
       }
-    };
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia(constraints); }
-    catch(e) {
-      // Fallback: remove exact facingMode
-      constraints.video.facingMode = 'environment';
-      try { stream = await navigator.mediaDevices.getUserMedia(constraints); }
-      catch(e2) {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      }
+      statusEl.textContent = msg;
+      toast('カメラを起動できませんでした', 'error');
+      return;
     }
 
     videoEl.srcObject = stream;
     videoTrack = stream.getVideoTracks()[0];
     await videoEl.play();
+
+    // Apply advanced constraints AFTER stream is obtained (correct way)
+    if(videoTrack && videoTrack.applyConstraints) {
+      try {
+        await videoTrack.applyConstraints({
+          advanced: [
+            { focusMode: 'continuous' },
+            { exposureMode: 'continuous' },
+            { whiteBalanceMode: 'continuous' }
+          ]
+        });
+      } catch(e) { /* advanced constraints not supported — ignore */ }
+    }
 
     // Check capabilities
     const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
@@ -1045,6 +1107,7 @@ function toast(msg, type='success') {
 }
 
 function esc(s){const d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
+function showHttpsGuide(){document.getElementById('https-guide').style.display='flex';}
 
 // ================================================================
 //  INIT
