@@ -1196,12 +1196,7 @@
             qrScanner: null,
             scannerActive: false,
             _lastScanTime: 0,
-            _cameraStream: null,
-            _videoTrack: null,
-            _barcodeDetector: null,
-            _detectorTimer: null,
-            _torchOn: false,
-            _zoomValue: null,
+            _lastScanText: '',
             inoutScanner: null,
             inoutScannerActive: false,
             newItemScanner: null,
@@ -1755,19 +1750,29 @@
                 } catch(e) { return []; }
             },
 
-            // ZXing BrowserMultiFormatReader インスタンスを生成
+            // ZXing BrowserMultiFormatReader インスタンスを生成（安定化版）
             _createZXingReader(mode) {
+                if (typeof ZXing === 'undefined') {
+                    console.error('ZXing library not loaded');
+                    return null;
+                }
                 try {
                     const hints = new Map();
                     const formats = this._getZXingFormats(mode);
-                    if (formats.length > 0) {
+                    if (formats && formats.length > 0) {
                         hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
                     }
                     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-                    return new ZXing.BrowserMultiFormatReader(hints, 80); // 80ms/フレーム
-                } catch(e) {
-                    console.warn('ZXing reader creation with hints failed, using default:', e);
-                    return new ZXing.BrowserMultiFormatReader();
+                    // 50ms/フレーム：モバイルでの検出追従を改善
+                    return new ZXing.BrowserMultiFormatReader(hints, 50);
+                } catch (e) {
+                    console.warn('ZXing reader creation with hints failed:', e);
+                    try {
+                        return new ZXing.BrowserMultiFormatReader();
+                    } catch (e2) {
+                        console.error('ZXing reader creation failed:', e2);
+                        return null;
+                    }
                 }
             },
 
@@ -1782,7 +1787,7 @@
                 };
             },
 
-            // スキャナーコンテナに video 要素とスキャン枠オーバーレイを設置し、video 要素を返す
+            // スキャナーコンテナに video 要素とスキャン枠オーバーレイを設置し、video 要素を返す（安定化版）
             _setupScannerContainer(elementId) {
                 const container = document.getElementById(elementId);
                 if (!container) return null;
@@ -1794,33 +1799,32 @@
 
                 const video = document.createElement('video');
                 video.id = elementId + '-video';
+                // iOS Safari 対策：playsinline + muted + autoplay を明示
                 video.setAttribute('playsinline', '');
                 video.setAttribute('muted', '');
                 video.setAttribute('autoplay', '');
                 video.muted = true;
                 video.playsInline = true;
-                video.autoplay = true;
-                video.style.cssText = 'width:100%;display:block;max-height:300px;object-fit:cover;background:#000;';
+                video.style.cssText = 'width:100%;display:block;max-height:260px;object-fit:cover;';
                 container.appendChild(video);
 
-                // スキャン枠オーバーレイ（コーナーブラケット）
                 const is1D = this.scanMode === '1d';
                 const overlay = document.createElement('div');
                 overlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
                 const boxCss = is1D
-                    ? 'position:absolute;left:3%;top:32%;width:94%;height:36%;'   // 1Dは横長ROIを強める
-                    : 'position:absolute;left:6%;top:10%;width:88%;height:80%;';
+                    ? 'position:absolute;left:3%;top:28%;width:94%;height:44%;'
+                    : 'position:absolute;left:5%;top:5%;width:90%;height:90%;';
                 const c = '#00e070';
                 overlay.innerHTML = `
-                    <div style="${boxCss}border:2px solid ${c};border-radius:4px;">
-                        <div style="position:absolute;top:-3px;left:-3px;width:20px;height:20px;border-top:4px solid ${c};border-left:4px solid ${c};border-radius:3px 0 0 0;"></div>
-                        <div style="position:absolute;top:-3px;right:-3px;width:20px;height:20px;border-top:4px solid ${c};border-right:4px solid ${c};border-radius:0 3px 0 0;"></div>
-                        <div style="position:absolute;bottom:-3px;left:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-left:4px solid ${c};border-radius:0 0 0 3px;"></div>
-                        <div style="position:absolute;bottom:-3px;right:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-right:4px solid ${c};border-radius:0 0 3px 0;"></div>
-                    </div>
-                    <div style="position:absolute;bottom:8px;left:0;width:100%;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.8);">
-                        ${is1D ? 'GS1-128/EANは「少し離して」枠内に合わせてください' : 'QR/Datamatrixを枠内に合わせてください'}
-                    </div>`;
+                  <div style="${boxCss}border:2px solid ${c};border-radius:4px;">
+                    <div style="position:absolute;top:-3px;left:-3px;width:20px;height:20px;border-top:4px solid ${c};border-left:4px solid ${c};border-radius:3px 0 0 0;"></div>
+                    <div style="position:absolute;top:-3px;right:-3px;width:20px;height:20px;border-top:4px solid ${c};border-right:4px solid ${c};border-radius:0 3px 0 0;"></div>
+                    <div style="position:absolute;bottom:-3px;left:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-left:4px solid ${c};border-radius:0 0 0 3px;"></div>
+                    <div style="position:absolute;bottom:-3px;right:-3px;width:20px;height:20px;border-bottom:4px solid ${c};border-right:4px solid ${c};border-radius:0 0 3px 0;"></div>
+                  </div>
+                  <div style="position:absolute;bottom:8px;left:0;width:100%;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.8);">
+                    ${is1D ? 'バーコードを枠内に合わせてください' : 'QR/2Dコードを枠内に合わせてください'}
+                  </div>`;
                 container.appendChild(overlay);
 
                 return video;
@@ -1834,100 +1838,203 @@
                 }
             },
 
-            startScanner() {
+            async startScanner() {
                 if (this.scannerActive) return;
+
+                if (typeof ZXing === 'undefined') {
+                    alert('バーコードライブラリの読み込みに失敗しました。
+ページを再読み込みしてください。');
+                    return;
+                }
+
                 this.scannerActive = true;
                 this._lastScanTime = 0;
-
+                this._lastScanText = '';
                 const btn = document.getElementById('btn-start-scan');
                 if (btn) {
                     btn.textContent = '⏳ カメラ起動中...';
                     btn.disabled = true;
-                    btn.classList.remove('btn-secondary');
-                    btn.classList.add('btn-danger');
                 }
 
-                const video = this._setupScannerContainer('qr-reader');
-                if (!video) {
-                    alert('スキャナー表示領域が見つかりません。');
-                    this.scannerActive = false;
-                    if (btn) { btn.textContent = '📷 カメラを開始'; btn.disabled = false; btn.classList.add('btn-secondary'); btn.classList.remove('btn-danger'); }
-                    return;
-                }
-
-                const preferNative = ('BarcodeDetector' in window);
-                const run = async () => {
-                    try {
-                        // まずはネイティブBarcodeDetector（iPhoneで最も強い）を優先
-                        if (preferNative) {
-                            await this._startNativeBarcodeDetector(video);
-                        } else {
-                            await this._startZXingFallback(video);
-                        }
-
-                        if (btn) {
-                            btn.textContent = '📷 カメラを停止';
-                            btn.disabled = false;
-                        }
-                    } catch (err) {
-                        console.error('Scanner start failed:', err);
-                        // BarcodeDetectorが失敗したらZXingへフォールバック
-                        try {
-                            await this._startZXingFallback(video);
-                            if (btn) {
-                                btn.textContent = '📷 カメラを停止';
-                                btn.disabled = false;
-                            }
-                            return;
-                        } catch (err2) {
-                            console.error('ZXing fallback failed:', err2);
-                        }
-
-                        let msg = 'カメラの起動または読み取りに失敗しました。
-';
-                        if (err && err.name === 'NotAllowedError') msg += 'カメラの使用を許可してください。';
-                        else if (err && err.name === 'NotFoundError') msg += 'カメラが見つかりません。';
-                        else if (err && err.name === 'NotReadableError') msg += '他のアプリがカメラを使用中の可能性があります。';
-                        else msg += (err && err.message) ? err.message : '不明なエラー';
-
-                        alert(msg);
-                        this.stopScanner();
-                    }
-                };
-
-                run();
-            },
-
-            stopScanner() {
-                return new Promise((resolve) => {
-                    // Native detector loop stop
-                    try {
-                        if (this._detectorTimer) {
-                            clearInterval(this._detectorTimer);
-                            this._detectorTimer = null;
-                        }
-                    } catch(e) {}
-
-                    // ZXing stop
+                try {
                     if (this.qrScanner) {
                         try { this.qrScanner.reset(); } catch(e) {}
                         this.qrScanner = null;
                     }
 
-                    // Stream stop
-                    try {
-                        if (this._cameraStream) {
-                            this._cameraStream.getTracks().forEach(t => { try { t.stop(); } catch(e) {} });
+                    const video = this._setupScannerContainer('qr-reader');
+                    if (!video) throw new Error('Scanner container not found');
+
+                    this.qrScanner = this._createZXingReader(this.scanMode);
+                    if (!this.qrScanner) throw new Error('Failed to create barcode reader');
+
+                    // バックカメラを自動選択（取得できなければ null で既定カメラ）
+                    const deviceId = await this._findBackCamera();
+                    console.log('Using camera deviceId:', deviceId);
+
+                    // decodeFromVideoDevice を使用（iOS/モバイルで安定しやすい）
+                    await this.qrScanner.decodeFromVideoDevice(
+                        deviceId,
+                        video,
+                        (result, error) => {
+                            if (!this.scannerActive) return;
+                            if (result) {
+                                const now = Date.now();
+                                const text = result.getText();
+                                // 連続スキャン抑制（同一内容は 1.2 秒抑制）
+                                if (text === this._lastScanText && (now - this._lastScanTime) < 1200) return;
+                                if ((now - this._lastScanTime) < 700) return;
+                                this._lastScanTime = now;
+                                this._lastScanText = text;
+                                console.log('Barcode detected:', text);
+                                this.handleScanResult(text);
+                            }
                         }
-                    } catch(e) {}
-                    this._cameraStream = null;
-                    this._videoTrack = null;
-                    this._barcodeDetector = null;
-                    this._torchOn = false;
-                    this._zoomValue = null;
+                    );
+
+                    // 起動後にトラックへ追加制約（連続AF等）を試す
+                    setTimeout(() => {
+                        try {
+                            const stream = video.srcObject;
+                            const track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+                            if (track) this._applyAdvancedTrackConstraints(track);
+                        } catch(e) {}
+                    }, 400);
+
+                    if (btn) {
+                        btn.textContent = '📷 カメラを停止';
+                        btn.disabled = false;
+                        btn.classList.remove('btn-secondary');
+                        btn.classList.add('btn-danger');
+                    }
+                } catch (err) {
+                    console.error('Scanner start failed:', err);
+
+                    // フォールバック：decodeFromConstraints（環境カメラ指定）
+                    try {
+                        console.log('Trying fallback with decodeFromConstraints...');
+                        if (this.qrScanner) {
+                            try { this.qrScanner.reset(); } catch(e) {}
+                        }
+                        const video = this._setupScannerContainer('qr-reader');
+                        this.qrScanner = this._createZXingReader(this.scanMode);
+
+                        if (this.qrScanner && video) {
+                            await this.qrScanner.decodeFromConstraints(
+                                this._getCameraConstraints ? this._getCameraConstraints() : { video: { facingMode: 'environment' } },
+                                video,
+                                (result) => {
+                                    if (!this.scannerActive) return;
+                                    if (result) {
+                                        const now = Date.now();
+                                        const text = result.getText();
+                                        if (text === this._lastScanText && (now - this._lastScanTime) < 1200) return;
+                                        if ((now - this._lastScanTime) < 700) return;
+                                        this._lastScanTime = now;
+                                        this._lastScanText = text;
+                                        this.handleScanResult(text);
+                                    }
+                                }
+                            );
+                            if (btn) {
+                                btn.textContent = '📷 カメラを停止';
+                                btn.disabled = false;
+                                btn.classList.remove('btn-secondary');
+                                btn.classList.add('btn-danger');
+                            }
+                            return;
+                        }
+                    } catch (fallbackErr) {
+                        console.error('Fallback also failed:', fallbackErr);
+                    }
+
+                    let errorMsg = 'カメラへのアクセスに失敗しました。
+';
+                    if (err && err.name === 'NotAllowedError') {
+                        errorMsg += 'カメラの使用を許可してください。
+ブラウザの設定からカメラアクセスを許可できます。';
+                    } else if (err && err.name === 'NotFoundError') {
+                        errorMsg += 'カメラが見つかりません。';
+                    } else if (err && err.name === 'NotReadableError') {
+                        errorMsg += '他のアプリがカメラを使用中の可能性があります。';
+                    } else {
+                        errorMsg += (err && err.message) ? err.message : '不明なエラーが発生しました。';
+                    }
+                    alert(errorMsg);
 
                     this.scannerActive = false;
+                    if (btn) {
+                        btn.textContent = '📷 カメラを開始';
+                        btn.disabled = false;
+                        btn.classList.add('btn-secondary');
+                        btn.classList.remove('btn-danger');
+                    }
+                    const container = document.getElementById('qr-reader');
+                    if (container) container.innerHTML = '';
+                }
+            },
 
+            // バックカメラの deviceId を推定（取得できなければ null）
+            async _findBackCamera() {
+                try {
+                    // iOSは enumerateDevices の label を出すのに getUserMedia が必要
+                    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    tempStream.getTracks().forEach(t => t.stop());
+
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    console.log('Available cameras:', videoDevices.map(d => d.label));
+
+                    if (videoDevices.length === 0) return null;
+
+                    const backCamera = videoDevices.find(d => /back|rear|environment|背面/i.test(d.label));
+                    if (backCamera) return backCamera.deviceId;
+
+                    // label が空の端末向け：最後のカメラを背面とみなすことが多い
+                    if (videoDevices.length > 1) return videoDevices[videoDevices.length - 1].deviceId;
+                    return videoDevices[0].deviceId;
+                } catch(e) {
+                    console.warn('Camera enumeration failed:', e);
+                    return null;
+                }
+            },
+
+            // 連続オートフォーカス等を可能な範囲で適用（端末依存・失敗してもOK）
+            async _applyAdvancedTrackConstraints(track) {
+                if (!track || !track.applyConstraints) return;
+                try {
+                    const caps = track.getCapabilities ? track.getCapabilities() : {};
+                    const adv = {};
+
+                    if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+                        adv.focusMode = 'continuous';
+                    }
+                    if (caps.exposureMode && Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) {
+                        adv.exposureMode = 'continuous';
+                    }
+                    if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
+                        adv.whiteBalanceMode = 'continuous';
+                    }
+                    // 解像度（端末が許す範囲で）
+                    const constraints = {
+                        advanced: [adv],
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                    };
+                    await track.applyConstraints(constraints);
+                } catch(e) {
+                    // 失敗しても読み取りは継続
+                    console.debug('applyConstraints skipped:', e);
+                }
+            },
+
+            stopScanner() {
+                return new Promise((resolve) => {
+                    if (this.qrScanner) {
+                        try { this.qrScanner.reset(); } catch(e) {}
+                        this.qrScanner = null;
+                    }
+                    this.scannerActive = false;
                     const btn = document.getElementById('btn-start-scan');
                     if (btn) {
                         btn.textContent = '📷 カメラを開始';
@@ -1935,293 +2042,13 @@
                         btn.classList.add('btn-secondary');
                         btn.classList.remove('btn-danger');
                     }
-
                     const container = document.getElementById('qr-reader');
                     if (container) container.innerHTML = '';
                     resolve();
                 });
             },
 
-            
-            // === iPhone向け：ネイティブ BarcodeDetector 優先 ===
-            async _startNativeBarcodeDetector(video) {
-                // カメラは自前でgetUserMedia（高解像度＋背面）で取る
-                const constraints = {
-                    audio: false,
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 },
-                        frameRate: { ideal: 30, max: 60 }
-                    }
-                };
-
-                // 既存停止
-                if (this._cameraStream) {
-                    try { this._cameraStream.getTracks().forEach(t => t.stop()); } catch(e) {}
-                }
-
-                this._cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-                video.srcObject = this._cameraStream;
-
-                await new Promise((res) => {
-                    const onReady = () => res();
-                    if (video.readyState >= 2) return res();
-                    video.onloadedmetadata = onReady;
-                });
-
-                try { await video.play(); } catch(e) {}
-
-                // track capabilities
-                const tracks = this._cameraStream.getVideoTracks();
-                this._videoTrack = tracks && tracks[0] ? tracks[0] : null;
-
-                // BarcodeDetector formats
-                const formats1D = ['code_128', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e'];
-                const formats2D = ['qr_code', 'data_matrix', 'aztec', 'pdf417'];
-                const formats = (this.scanMode === '1d') ? formats1D : formats2D;
-
-                this._barcodeDetector = new BarcodeDetector({ formats });
-
-                // できる範囲でAF/露出/ズーム/ライトを最適化（対応機種のみ）
-                await this._setupTrackOptimizations();
-
-                // UI（ズーム/ライト）を作る
-                this._mountCameraControls();
-
-                // ROIキャンバス
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-                const detectOnce = async () => {
-                    if (!this.scannerActive) return;
-                    if (!video.videoWidth || !video.videoHeight) return;
-
-                    // ROI決定（1Dは横長、2Dは中央大きめ）
-                    const vw = video.videoWidth;
-                    const vh = video.videoHeight;
-
-                    let sx, sy, sw, sh;
-                    if (this.scanMode === '1d') {
-                        sw = Math.floor(vw * 0.92);
-                        sh = Math.floor(vh * 0.30);
-                        sx = Math.floor(vw * 0.04);
-                        sy = Math.floor(vh * 0.35);
-                    } else {
-                        sw = Math.floor(vw * 0.86);
-                        sh = Math.floor(vh * 0.76);
-                        sx = Math.floor(vw * 0.07);
-                        sy = Math.floor(vh * 0.12);
-                    }
-
-                    // キャンバス解像度（小さすぎると1Dが死ぬので最低幅900px確保）
-                    const targetW = Math.max(900, sw);
-                    const scale = targetW / sw;
-                    canvas.width = Math.floor(sw * scale);
-                    canvas.height = Math.floor(sh * scale);
-
-                    try {
-                        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-                        const barcodes = await this._barcodeDetector.detect(canvas);
-                        if (barcodes && barcodes.length) {
-                            const now = Date.now();
-                            if (now - this._lastScanTime < 900) return;
-                            this._lastScanTime = now;
-
-                            const raw = barcodes[0].rawValue || '';
-                            if (raw) {
-                                console.log('Native barcode detected:', raw);
-                                this.handleScanResult(raw);
-                            }
-                        }
-                    } catch (e) {
-                        // detectエラーは握りつぶして継続（iOSで一時的に出ることがある）
-                    }
-                };
-
-                // intervalで回す（rAFより省電力で安定）
-                if (this._detectorTimer) clearInterval(this._detectorTimer);
-                this._detectorTimer = setInterval(detectOnce, 120);
-            },
-
-            async _startZXingFallback(video) {
-                if (typeof ZXing === 'undefined') throw new Error('ZXing library not loaded');
-
-                // コンテナ作り直し済み（video引数は同じDOMを使う）
-                if (this.qrScanner) {
-                    try { this.qrScanner.reset(); } catch(e) {}
-                    this.qrScanner = null;
-                }
-                this.qrScanner = this._createZXingReader(this.scanMode);
-                if (!this.qrScanner) throw new Error('Failed to create ZXing reader');
-
-                // バックカメラ自動選択（可能なら）
-                let deviceId = null;
-                try {
-                    deviceId = await this._findBackCamera();
-                } catch(e) {}
-
-                await this.qrScanner.decodeFromVideoDevice(
-                    deviceId,
-                    video,
-                    (result, error) => {
-                        if (result && this.scannerActive) {
-                            const now = Date.now();
-                            if (now - this._lastScanTime < 900) return;
-                            this._lastScanTime = now;
-                            console.log('ZXing detected:', result.getText());
-                            this.handleScanResult(result.getText());
-                        }
-                    }
-                );
-            },
-
-            async _setupTrackOptimizations() {
-                const t = this._videoTrack;
-                if (!t || !t.getCapabilities) return;
-                const caps = t.getCapabilities();
-
-                // 連続AF/露出/ホワイトバランス（可能なときだけ）
-                const adv = [];
-                if (caps.focusMode && Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
-                    adv.push({ focusMode: 'continuous' });
-                }
-                if (caps.exposureMode && Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) {
-                    adv.push({ exposureMode: 'continuous' });
-                }
-                if (caps.whiteBalanceMode && Array.isArray(caps.whiteBalanceMode) && caps.whiteBalanceMode.includes('continuous')) {
-                    adv.push({ whiteBalanceMode: 'continuous' });
-                }
-
-                // ズーム：iPhone 16e なら大抵OK。2.0付近がGS1-128に効くことが多い
-                if (typeof caps.zoom !== 'undefined') {
-                    const zMin = caps.zoom.min ?? 1;
-                    const zMax = caps.zoom.max ?? 1;
-                    const z = Math.min(zMax, Math.max(zMin, 2.0));
-                    this._zoomValue = z;
-                    adv.push({ zoom: z });
-                }
-
-                if (adv.length) {
-                    try { await t.applyConstraints({ advanced: adv }); } catch(e) {}
-                }
-            },
-
-            _mountCameraControls() {
-                const host = document.getElementById('qr-reader');
-                if (!host) return;
-
-                // 既にあれば作らない
-                if (document.getElementById('camera-controls')) return;
-
-                const wrap = document.createElement('div');
-                wrap.id = 'camera-controls';
-                wrap.style.cssText = 'display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;';
-
-                // Torch button
-                const torchBtn = document.createElement('button');
-                torchBtn.type = 'button';
-                torchBtn.className = 'btn btn-secondary';
-                torchBtn.style.cssText = 'flex:0 0 auto;padding:10px 12px;';
-                torchBtn.textContent = '🔦 ライト';
-                torchBtn.onclick = () => this._toggleTorch(torchBtn);
-
-                // Zoom slider
-                const zoomBox = document.createElement('div');
-                zoomBox.style.cssText = 'flex:1;display:flex;flex-direction:column;gap:6px;';
-                const zoomLabel = document.createElement('div');
-                zoomLabel.style.cssText = 'font-size:12px;color:var(--text-light);';
-                zoomLabel.textContent = 'ズーム';
-                const slider = document.createElement('input');
-                slider.type = 'range';
-                slider.min = '1';
-                slider.max = '4';
-                slider.step = '0.1';
-                slider.value = String(this._zoomValue ?? 1);
-                slider.oninput = () => this._applyZoom(parseFloat(slider.value));
-                zoomBox.appendChild(zoomLabel);
-                zoomBox.appendChild(slider);
-
-                wrap.appendChild(torchBtn);
-                wrap.appendChild(zoomBox);
-
-                host.appendChild(wrap);
-
-                // capabilitiesに応じて無効化
-                const t = this._videoTrack;
-                if (t && t.getCapabilities) {
-                    const caps = t.getCapabilities();
-                    if (!caps.torch) {
-                        torchBtn.disabled = true;
-                        torchBtn.textContent = '🔦 ライト（非対応）';
-                    }
-                    if (typeof caps.zoom === 'undefined') {
-                        slider.disabled = true;
-                        zoomLabel.textContent = 'ズーム（非対応）';
-                    } else {
-                        // 実際の範囲に合わせる
-                        slider.min = String(caps.zoom.min ?? 1);
-                        slider.max = String(caps.zoom.max ?? 1);
-                        slider.step = '0.1';
-                        slider.value = String(this._zoomValue ?? (caps.zoom.min ?? 1));
-                    }
-                } else {
-                    torchBtn.disabled = true;
-                    slider.disabled = true;
-                }
-            },
-
-            async _toggleTorch(btn) {
-                const t = this._videoTrack;
-                if (!t) return;
-                try {
-                    this._torchOn = !this._torchOn;
-                    await t.applyConstraints({ advanced: [{ torch: this._torchOn }] });
-                    if (btn) {
-                        btn.classList.toggle('btn-danger', this._torchOn);
-                        btn.classList.toggle('btn-secondary', !this._torchOn);
-                        btn.textContent = this._torchOn ? '🔦 ライトON' : '🔦 ライト';
-                    }
-                } catch(e) {
-                    // 失敗したら元に戻す
-                    this._torchOn = !this._torchOn;
-                }
-            },
-
-            async _applyZoom(z) {
-                const t = this._videoTrack;
-                if (!t) return;
-                try {
-                    this._zoomValue = z;
-                    await t.applyConstraints({ advanced: [{ zoom: z }] });
-                } catch(e) {}
-            },
-
-            async _findBackCamera() {
-                try {
-                    // label取得のための一時許可
-                    const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                    tempStream.getTracks().forEach(t => t.stop());
-
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
-                    if (videoDevices.length === 0) return null;
-
-                    const backCamera = videoDevices.find(d =>
-                        /back|rear|environment|背面/i.test(d.label)
-                    );
-                    if (backCamera) return backCamera.deviceId;
-
-                    // 複数なら最後を優先（iPhoneは最後が背面になりやすい）
-                    if (videoDevices.length > 1) return videoDevices[videoDevices.length - 1].deviceId;
-
-                    return videoDevices[0].deviceId;
-                } catch(e) {
-                    return null;
-                }
-            },
-
-async handleScanResult(barcode) {
+            async handleScanResult(barcode) {
                 this.stopScanner();
                 document.getElementById('manual-barcode-input').value = barcode;
                 await this.handleManualBarcodeLookup();
