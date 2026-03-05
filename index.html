@@ -1,433 +1,157 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>検査室 GS1スキャナ（CSV出力）</title>
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
-  <style>
-    :root { --bg:#0b1220; --card:#111b2e; --txt:#e6edf7; --sub:#9bb0d1; --btn:#2b6cff; --danger:#ff4d4d; }
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif;background:var(--bg);color:var(--txt);}
-    header{padding:14px 16px;background:linear-gradient(180deg,#0f1a33,#0b1220);position:sticky;top:0;z-index:5}
-    h1{font-size:16px;margin:0 0 6px 0}
-    .sub{font-size:12px;color:var(--sub);line-height:1.4}
-    .wrap{padding:14px 16px;max-width:980px;margin:0 auto}
-    .grid{display:grid;gap:12px}
-    @media (min-width:860px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
-    .card{background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px}
-    video{width:100%;border-radius:12px;background:#000;aspect-ratio: 3/4;object-fit:cover}
-    .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-    button{
-      border:0;border-radius:12px;padding:11px 12px;font-size:14px;
-      background:rgba(255,255,255,0.08);color:var(--txt);cursor:pointer
-    }
-    button.primary{background:var(--btn)}
-    button.danger{background:rgba(255,77,77,0.18);color:#ffd2d2}
-    button:disabled{opacity:.5;cursor:not-allowed}
-    select,input{
-      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
-    }
-    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
-    table{width:100%;border-collapse:collapse;font-size:12px}
-    th,td{border-bottom:1px solid rgba(255,255,255,0.10);padding:8px 6px;vertical-align:top}
-    th{color:var(--sub);text-align:left;font-weight:600}
-    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:11px;color:var(--sub)}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .hint{font-size:12px;color:var(--sub);line-height:1.5}
-    .ok{color:#a7ffbf}
-    .warn{color:#ffd28a}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GS1スキャナ</title>
+
+<script src="https://unpkg.com/@zxing/library@latest"></script>
+
+<style>
+body{
+font-family:sans-serif;
+text-align:center;
+background:#111;
+color:white;
+}
+
+video{
+width:90%;
+max-width:500px;
+border-radius:10px;
+}
+
+button{
+padding:12px;
+margin:10px;
+font-size:16px;
+}
+</style>
 </head>
+
 <body>
-<header>
-  <h1>検査室 GS1スキャナ（GS1-128 / Code128）</h1>
-  <div class="sub">iPhoneはHTTPS必須。スキャン→GTIN/期限/LOT自動分解→CSVダウンロード。</div>
-</header>
 
-<div class="wrap">
-  <div class="grid">
-    <div class="card">
-      <video id="video" playsinline></video>
+<h2>検査室 GS1スキャナ</h2>
 
-      <div class="row">
-        <button class="primary" id="btnStart">カメラ開始</button>
-        <button id="btnStop" disabled>停止</button>
-        <button id="btnTorch" disabled>ライト(トーチ)</button>
-        <span class="pill" id="status">待機中</span>
-      </div>
+<video id="video"></video>
 
-      <label>カメラ選択</label>
-      <select id="cameraSelect"></select>
+<br>
 
-      <label>手入力 / 貼り付け（Cognexの ]C1… でもOK）</label>
-      <input id="manual" class="mono" placeholder="例：]C101049123456789031724033110ABC123" />
-      <div class="row">
-        <button id="btnManual">解析して追加</button>
-      </div>
+<button onclick="start()">カメラ開始</button>
+<button onclick="downloadCSV()">CSVダウンロード</button>
 
-      <p class="hint">
-        <span class="ok">✅ 推奨：</span>ラベル全体が映る距離 → ゆっくり近づける。<br/>
-        <span class="warn">⚠ よくある原因：</span>暗い/反射/ブレ/ラベルが小さい → ライトON、明るい場所、固定。
-      </p>
-    </div>
-
-    <div class="card">
-      <div class="row">
-        <button class="primary" id="btnCsv">CSVダウンロード</button>
-        <button class="danger" id="btnClear">履歴クリア</button>
-      </div>
-
-      <label>履歴（最新が下）</label>
-      <table id="tbl">
-        <thead>
-          <tr>
-            <th style="width:140px">時刻</th>
-            <th style="width:160px">GTIN(01)</th>
-            <th style="width:110px">期限(17)</th>
-            <th style="width:140px">LOT(10)</th>
-            <th>生データ</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-
-      <p class="hint">
-        CSV列：time,gtin,exp,lot,raw<br/>
-        exp は YYMMDD → 20YY-MM-DD に整形（年は 2000年代扱い）
-      </p>
-    </div>
-  </div>
-</div>
+<table id="table">
+<tr>
+<th>time</th>
+<th>GTIN</th>
+<th>EXP</th>
+<th>LOT</th>
+</tr>
+</table>
 
 <script>
-/* -------------------------
-   設定
-------------------------- */
-const SCAN_COOLDOWN_MS = 1200; // 同じコードの連続登録防止
-const MAX_ROWS = 500;         // 履歴上限（必要なら増やす）
 
-/* -------------------------
-   GS1 パーサ（よく使うAI：01/17/10）
-   - ]C1 や ]C101 を含む Symbology Identifier を除去
-   - GS(ASCII29) を区切りとして扱う（入っていれば最強）
-   - 区切りが無い場合も、AIの固定長/可変長を使って推定
-------------------------- */
-function normalizeRaw(raw){
-  if(!raw) return "";
-  // 先頭のSymbology Identifier（例：]C1）を除去
-  // Cognex等で ]C101.... のように来ることがある
-  if(raw.startsWith("]C1")) raw = raw.slice(3);
-  if(raw.startsWith("]c1")) raw = raw.slice(3);
-  if(raw.startsWith("]E0")) raw = raw.slice(3); // GS1 DataMatrixなどの可能性
-  if(raw.startsWith("]e0")) raw = raw.slice(3);
-  return raw.trim();
+let data=[];
+
+function parseGS1(raw){
+
+raw=raw.replace("]C1","");
+
+let gtin="";
+let exp="";
+let lot="";
+
+let i=0;
+
+while(i<raw.length){
+
+let ai=raw.substr(i,2);
+
+if(ai=="01"){
+gtin=raw.substr(i+2,14);
+i+=16;
+continue;
 }
 
-function formatYYMMDD(yymmdd){
-  if(!/^\d{6}$/.test(yymmdd)) return "";
-  const yy = parseInt(yymmdd.slice(0,2),10);
-  const mm = yymmdd.slice(2,4);
-  const dd = yymmdd.slice(4,6);
-  const yyyy = 2000 + yy; // ここは運用に合わせて調整可能
-  return `${yyyy}-${mm}-${dd}`;
+if(ai=="17"){
+exp=raw.substr(i+2,6);
+i+=8;
+continue;
 }
 
-function parseGS1(rawInput){
-  const raw = normalizeRaw(rawInput);
-
-  // GS (ASCII 29) が含まれる場合：可変長AIの区切りが取れる
-  const GS = String.fromCharCode(29);
-
-  // 代表AIのみ対応（必要なら追加）
-  // 01:固定14, 17:固定6, 10:可変(～20)※GS区切り or 終端
-  const out = { gtin:"", exp:"", lot:"" };
-
-  let i = 0;
-
-  // ()付き表記にも対応（例：(01)....）
-  const s = raw.replace(/\(/g,"").replace(/\)/g,""); // (01)形式を除去して連続にする簡易対応
-
-  while(i < s.length){
-    // GSが来たら飛ばす
-    if(s[i] === GS){ i++; continue; }
-
-    const ai2 = s.slice(i, i+2);
-    const ai3 = s.slice(i, i+3);
-    const ai4 = s.slice(i, i+4);
-
-    if(ai2 === "01"){
-      const v = s.slice(i+2, i+2+14);
-      if(/^\d{14}$/.test(v)) out.gtin = v;
-      i += 2+14;
-      continue;
-    }
-    if(ai2 === "17"){
-      const v = s.slice(i+2, i+2+6);
-      if(/^\d{6}$/.test(v)) out.exp = formatYYMMDD(v);
-      i += 2+6;
-      continue;
-    }
-    if(ai2 === "10"){
-      // 可変：GSがあればそこまで。無ければ最大20文字（現場運用ではLOTが末尾のことが多い）
-      let start = i+2;
-      let end = start;
-
-      // GSが見つかればそこまで
-      const gsPos = s.indexOf(GS, start);
-      if(gsPos !== -1){
-        end = gsPos;
-      } else {
-        end = Math.min(start + 20, s.length);
-      }
-      out.lot = s.slice(start, end);
-      i = end;
-      continue;
-    }
-
-    // 未対応AI：1文字進める（暴走防止）
-    i++;
-  }
-
-  return out;
+if(ai=="10"){
+lot=raw.substr(i+2);
+break;
 }
 
-/* -------------------------
-   履歴・CSV
-------------------------- */
-let rows = [];
-let lastSeen = new Map(); // code -> timestamp
+i++;
 
-function addRow(raw){
-  const now = new Date();
-  const time = now.toLocaleString();
-
-  const parsed = parseGS1(raw);
-  const record = {
-    time,
-    gtin: parsed.gtin || "",
-    exp: parsed.exp || "",
-    lot: parsed.lot || "",
-    raw: raw
-  };
-
-  rows.push(record);
-  if(rows.length > MAX_ROWS) rows.shift();
-
-  renderTable();
 }
 
-function renderTable(){
-  const tbody = document.querySelector("#tbl tbody");
-  tbody.innerHTML = "";
-  for(const r of rows){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(r.time)}</td>
-      <td class="mono">${escapeHtml(r.gtin)}</td>
-      <td class="mono">${escapeHtml(r.exp)}</td>
-      <td class="mono">${escapeHtml(r.lot)}</td>
-      <td class="mono">${escapeHtml(r.raw)}</td>
-    `;
-    tbody.appendChild(tr);
-  }
+return {gtin,exp,lot};
+
+}
+
+const codeReader = new ZXing.BrowserMultiFormatReader();
+
+function start(){
+
+navigator.mediaDevices.getUserMedia({
+video:{facingMode:"environment"}
+}).then(stream=>{
+
+video.srcObject=stream;
+
+codeReader.decodeFromVideoElement(video,(result,err)=>{
+
+if(result){
+
+let raw=result.text;
+
+let parsed=parseGS1(raw);
+
+let now=new Date().toLocaleString();
+
+data.push([now,parsed.gtin,parsed.exp,parsed.lot]);
+
+let table=document.getElementById("table");
+
+let row=table.insertRow();
+
+row.insertCell(0).innerText=now;
+row.insertCell(1).innerText=parsed.gtin;
+row.insertCell(2).innerText=parsed.exp;
+row.insertCell(3).innerText=parsed.lot;
+
+}
+
+});
+
+});
+
 }
 
 function downloadCSV(){
-  let csv = "time,gtin,exp,lot,raw\n";
-  for(const r of rows){
-    csv += [
-      r.time, r.gtin, r.exp, r.lot, r.raw
-    ].map(csvEscape).join(",") + "\n";
-  }
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `gs1_scan_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}
 
-function csvEscape(v){
-  const s = String(v ?? "");
-  if(/[",\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
-  return s;
-}
-function escapeHtml(s){
-  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
+let csv="time,gtin,exp,lot\n";
 
-/* -------------------------
-   カメラ・スキャン（ZXing）
-------------------------- */
-const statusEl = document.getElementById("status");
-const btnStart = document.getElementById("btnStart");
-const btnStop  = document.getElementById("btnStop");
-const btnTorch = document.getElementById("btnTorch");
-const camSel   = document.getElementById("cameraSelect");
-
-const videoEl  = document.getElementById("video");
-const manualEl = document.getElementById("manual");
-
-let codeReader = null;
-let currentTrack = null;
-let torchOn = false;
-let decoding = false;
-
-function setStatus(t){ statusEl.textContent = t; }
-
-async function listCameras(){
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const cams = devices.filter(d => d.kind === "videoinput");
-  camSel.innerHTML = "";
-  cams.forEach((c, idx) => {
-    const opt = document.createElement("option");
-    opt.value = c.deviceId;
-    opt.textContent = c.label || `カメラ${idx+1}`;
-    camSel.appendChild(opt);
-  });
-
-  // iPhoneは背面カメラが最後に来ることがあるので label に "back" 等があれば優先
-  const preferred = cams.find(c => /back|rear|environment/i.test(c.label));
-  if(preferred) camSel.value = preferred.deviceId;
-}
-
-async function startCamera(){
-  if(!window.ZXing) { alert("ZXingライブラリの読み込みに失敗しました"); return; }
-
-  if(!navigator.mediaDevices?.getUserMedia){
-    alert("このブラウザはカメラに対応していません");
-    return;
-  }
-
-  if(codeReader) await stopCamera();
-
-  codeReader = new ZXing.BrowserMultiFormatReader();
-
-  const deviceId = camSel.value || null;
-  setStatus("カメラ起動中…");
-
-  decoding = true;
-
-  // decodeFromVideoDevice は内部で getUserMedia を呼びます
-  codeReader.decodeFromVideoDevice(deviceId, videoEl, (result, err) => {
-    if(!decoding) return;
-
-    if(result){
-      const raw = result.getText ? result.getText() : result.text;
-      if(!raw) return;
-
-      // クールダウン（同じコードを連続で拾わない）
-      const now = Date.now();
-      const last = lastSeen.get(raw) || 0;
-      if(now - last < SCAN_COOLDOWN_MS) return;
-      lastSeen.set(raw, now);
-
-      // 触覚フィードバック
-      if(navigator.vibrate) navigator.vibrate(30);
-
-      addRow(raw);
-      setStatus("読み取りOK");
-    }
-  });
-
-  // トーチ制御のため track を取得
-  try{
-    const stream = videoEl.srcObject;
-    if(stream){
-      currentTrack = stream.getVideoTracks()[0] || null;
-      btnTorch.disabled = !currentTrack;
-    }
-  }catch(e){
-    btnTorch.disabled = true;
-  }
-
-  btnStart.disabled = true;
-  btnStop.disabled  = false;
-  setStatus("スキャン中");
-}
-
-async function stopCamera(){
-  decoding = false;
-
-  try{
-    if(codeReader){
-      codeReader.reset();
-      codeReader = null;
-    }
-  }catch(e){}
-
-  try{
-    const stream = videoEl.srcObject;
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-    }
-    videoEl.srcObject = null;
-  }catch(e){}
-
-  currentTrack = null;
-  torchOn = false;
-  btnTorch.textContent = "ライト(トーチ)";
-  btnTorch.disabled = true;
-
-  btnStart.disabled = false;
-  btnStop.disabled  = true;
-  setStatus("停止中");
-}
-
-async function toggleTorch(){
-  if(!currentTrack) return;
-  const caps = currentTrack.getCapabilities?.();
-  if(!caps || !caps.torch){
-    alert("この端末/ブラウザではトーチに対応していません");
-    return;
-  }
-  torchOn = !torchOn;
-  await currentTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト(トーチ)";
-}
-
-/* -------------------------
-   イベント
-------------------------- */
-btnStart.addEventListener("click", async ()=>{
-  try{
-    // iOSで label を出すために一度許可を取るのがコツ
-    await navigator.mediaDevices.getUserMedia({ video:true });
-    await listCameras();
-    await startCamera();
-  }catch(e){
-    alert("カメラ許可が必要です（HTTPSで開いてください）");
-    setStatus("カメラ起動失敗");
-  }
+data.forEach(r=>{
+csv+=r.join(",")+"\n";
 });
 
-btnStop.addEventListener("click", stopCamera);
-btnTorch.addEventListener("click", toggleTorch);
+let blob=new Blob([csv]);
 
-document.getElementById("btnCsv").addEventListener("click", downloadCSV);
-document.getElementById("btnClear").addEventListener("click", ()=>{
-  rows = [];
-  lastSeen.clear();
-  renderTable();
-  setStatus("履歴クリア");
-});
+let a=document.createElement("a");
 
-document.getElementById("btnManual").addEventListener("click", ()=>{
-  const v = manualEl.value.trim();
-  if(!v) return;
-  addRow(v);
-  manualEl.value = "";
-  setStatus("手入力を追加");
-});
+a.href=URL.createObjectURL(blob);
 
-// 初期化
-(async ()=>{
-  try{
-    if(navigator.mediaDevices?.enumerateDevices){
-      await listCameras();
-    }
-  }catch(e){}
-})();
+a.download="scan.csv";
+
+a.click();
+
+}
+
 </script>
+
 </body>
 </html>
