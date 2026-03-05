@@ -172,25 +172,36 @@ function parseGS1(rawInput){
   let i = 0;
   while(i < s.length){
     if(s[i] === GS){ i++; continue; }
-    const ai2 = s.slice(i, i+2);
-    if(ai2 === "01"){
+    const a2 = s.slice(i, i+2);
+    // --- 対象AI ---
+    if(a2 === "01"){
       const v = s.slice(i+2, i+16);
       if(/^\d{14}$/.test(v)) out.gtin = v;
       i += 16; continue;
     }
-    if(ai2 === "17"){
+    if(a2 === "17"){
       const v = s.slice(i+2, i+8);
       if(/^\d{6}$/.test(v)) out.exp = formatYYMMDD(v);
       i += 8; continue;
     }
-    if(ai2 === "10"){
-      const start = i+2;
-      const gsPos = s.indexOf(GS, start);
-      const end = (gsPos !== -1) ? gsPos : Math.min(start + 20, s.length);
-      out.lot = s.slice(start, end);
-      i = end; continue;
+    if(a2 === "10"){
+      const st = i+2;
+      const gsP = s.indexOf(GS, st);
+      const en = gsP !== -1 ? gsP : Math.min(st+20, s.length);
+      out.lot = s.slice(st, en);
+      i = en; continue;
     }
-    i++;
+    // --- 既知固定長AIをスキップ（誤認識防止） ---
+    if(a2 === "00"){ i += 20; continue; }  // SSCC
+    if(a2 === "02"){ i += 16; continue; }  // GTIN(内容物)
+    if(["11","12","13","15","16","18","19","20"].includes(a2)){ i += 8; continue; }
+    // シリアル番号 AI21（可変長）
+    if(a2 === "21"){ const st=i+2; const gsP=s.indexOf(GS,st); i=gsP!==-1?gsP:Math.min(st+20,s.length); continue; }
+    // 3x系（重量・寸法）：AI4桁+データ6桁
+    if(/^3[1-6]/.test(a2)){ i += 10; continue; }
+    // --- 不明AI → 次のGSまでスキップ（i++より安全） ---
+    const nextGS = s.indexOf(GS, i);
+    if(nextGS !== -1){ i = nextGS; } else { break; }
   }
   return out;
 }
@@ -231,16 +242,17 @@ let running = false;
 let quaggaRunning = false;
 let zxingRunning = false;
 
-/* ZXing（2D用：Try harder + 主要フォーマット） */
+/* ZXing（CODE_128追加 — GS1-128対応の重要修正） */
 const zxingHints = new Map();
 zxingHints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 zxingHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+  ZXing.BarcodeFormat.CODE_128,    // GS1-128はCode128の一種（必須）
   ZXing.BarcodeFormat.QR_CODE,
   ZXing.BarcodeFormat.DATA_MATRIX,
   ZXing.BarcodeFormat.AZTEC,
   ZXing.BarcodeFormat.PDF_417
 ]);
-let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints, 300);
+let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints, 500);
 
 /* ========= 共通 ========= */
 function setStatus(t){ statusEl.textContent = t; }
@@ -314,13 +326,27 @@ function resizeOverlay(){
 }
 window.addEventListener("resize", resizeOverlay);
 
-/* ========= カメラ開始（背面固定 + 高解像度要求） ========= */
+/* ========= トーチ・ズーム初期化（trackセット後に呼ぶ） ========= */
+function setupTorchZoom(){
+  if(!track) return;
+  const caps = track.getCapabilities?.() || {};
+  btnTorch.disabled = !caps.torch;
+  if(caps.zoom){
+    zoomEl.disabled = false;
+    zoomEl.min   = caps.zoom.min;
+    zoomEl.max   = caps.zoom.max;
+    zoomEl.step  = caps.zoom.step || 0.1;
+    zoomEl.value = caps.zoom.min;
+    zoomInfo.textContent = `ズーム：対応（${caps.zoom.min}〜${caps.zoom.max}）`;
+  }else{
+    zoomEl.disabled = true;
+    zoomInfo.textContent = "ズーム：未対応";
+  }
+}
+
+/* ========= カメラ手動開始（2Dモード専用） ========= */
 async function startCamera(){
-  // 既に動いてたら停止
-  await stopAll();
-
   setStatus("カメラ起動中…");
-
   const constraints = {
     audio: false,
     video: {
@@ -330,86 +356,69 @@ async function startCamera(){
       frameRate: { ideal: 30, max: 30 }
     }
   };
-
   stream = await navigator.mediaDevices.getUserMedia(constraints);
   videoEl.srcObject = stream;
-
-  // iOSはplay明示が安定
   await videoEl.play().catch(()=>{});
-
   track = stream.getVideoTracks()[0] || null;
-
   resizeOverlay();
-
-  // トーチ/ズーム対応判定
-  const caps = track?.getCapabilities?.() || {};
-  btnTorch.disabled = !caps.torch;
-
-  if(caps.zoom){
-    zoomEl.disabled = false;
-    zoomEl.min = caps.zoom.min;
-    zoomEl.max = caps.zoom.max;
-    zoomEl.step = caps.zoom.step || 0.1;
-    zoomEl.value = caps.zoom.min;
-    zoomInfo.textContent = `ズーム：対応（${caps.zoom.min}〜${caps.zoom.max}）`;
-  }else{
-    zoomEl.disabled = true;
-    zoomInfo.textContent = "ズーム：未対応";
-  }
-
-  running = true;
-  btnStart.disabled = true;
-  btnStop.disabled = false;
-
-  setStatus("スキャン開始中…");
+  setupTorchZoom();
 }
 
-/* ========= 1D（Quagga2：Code128専用） ========= */
+/* ========= 1D（Quagga2：GS1-128/Code128） ========= */
 function start1D(){
-  if(quaggaRunning) return;
-  // Quaggaは内部でStreamを扱うので、video要素をtargetにする
-  Quagga.init({
-    inputStream: {
-      type: "LiveStream",
-      target: document.getElementById("viewport"),
-      constraints: {
-        facingMode: "environment",
-        width:  { ideal: 1920 },
-        height: { ideal: 1080 }
-      }
-    },
-    decoder: { readers: ["code_128_reader"] }, // GS1-128=Code128
-    locate: true,
-    numOfWorkers: navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2
-  }, (err) => {
-    if(err){
-      console.error(err);
-      debugEl.textContent = "1D初期化失敗：HTTPS/カメラ許可/端末を確認";
-      return;
-    }
-    Quagga.start();
-    quaggaRunning = true;
-  });
+  if(quaggaRunning) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    // イベントハンドラはinit前に登録（二重登録防止）
+    Quagga.offDetected();
+    Quagga.offProcessed();
+    Quagga.onDetected((data) => {
+      const raw = data?.codeResult?.code;
+      if(raw && raw.length >= 4) addDetected(raw);  // 短すぎる誤読を除外
+    });
+    Quagga.onProcessed(() => {
+      try { ctx.clearRect(0, 0, overlay.width, overlay.height); } catch(e){}
+    });
 
-  Quagga.offDetected(); // 二重登録防止
-  Quagga.onDetected((data) => {
-    const raw = data?.codeResult?.code;
-    if(raw){
-      addDetected(raw);
-    }
-  });
-
-  Quagga.offProcessed();
-  Quagga.onProcessed((result) => {
-    // ガイド表示（検出枠）
-    try{
-      ctx.clearRect(0,0,overlay.width,overlay.height);
-      if(result && result.boxes){
-        const vw = overlay.clientWidth;
-        const vh = overlay.clientHeight;
-        // Quaggaの座標系はviewport依存で崩れることがあるので簡易表示のみ
+    Quagga.init({
+      inputStream: {
+        type: "LiveStream",
+        target: videoEl,  // 既存video要素を直接使用（カメラ二重起動を防ぐ）
+        constraints: {
+          facingMode: { ideal: "environment" },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 }
+        }
+      },
+      decoder: {
+        readers: ["code_128_reader"],  // GS1-128 = Code128
+        multiple: false
+      },
+      locator: {
+        patchSize: "medium",  // 認識精度向上（small/medium/large/x-large）
+        halfSample: true
+      },
+      locate: true,
+      numOfWorkers: Math.min(4, navigator.hardwareConcurrency || 2)
+    }, async (err) => {
+      if(err){
+        console.error(err);
+        debugEl.textContent = "1D初期化失敗：HTTPS/カメラ許可/端末を確認";
+        reject(err);
+        return;
       }
-    }catch(e){}
+      Quagga.start();
+      quaggaRunning = true;
+      // Quaggaがvideo要素にstreamを設定するまで待機
+      await new Promise(r => setTimeout(r, 400));
+      if(videoEl.srcObject instanceof MediaStream){
+        stream = videoEl.srcObject;
+        track  = stream.getVideoTracks()[0] || null;
+        setupTorchZoom();
+        resizeOverlay();
+      }
+      resolve();
+    });
   });
 }
 
@@ -430,20 +439,26 @@ async function start2D(){
 
 /* ========= スキャン開始（モード別） ========= */
 async function startScan(){
-  await startCamera();
+  await stopAll();
+  running = true;
+  btnStart.disabled = true;
+  btnStop.disabled  = false;
 
   const mode = modeEl.value;
-  if(mode === "1d"){
-    start1D();
-    setStatus("スキャン中（1D:Code128）");
-  }else if(mode === "2d"){
+  if(mode === "2d"){
+    // 2D専用：手動カメラ管理 + ZXing
+    await startCamera();
     await start2D();
-    setStatus("スキャン中（2D:QR/DataMatrix）");
+    setStatus("スキャン中（2D: QR / DataMatrix）");
+  }else if(mode === "1d"){
+    // 1D専用：Quaggaがカメラ管理（二重起動なし）
+    await start1D();
+    setStatus("スキャン中（1D: GS1-128 / Code128）");
   }else{
-    // auto：両方起動（実運用最強）
-    start1D();
+    // 自動：Quaggaがカメラ管理 + ZXingも同じvideo要素で動作
+    await start1D();
     await start2D();
-    setStatus("スキャン中（自動：1D+2D）");
+    setStatus("スキャン中（自動：1D + 2D）");
   }
 }
 
@@ -524,6 +539,9 @@ btnStart.addEventListener("click", async ()=>{
     alert("カメラ起動に失敗しました。iPhoneはHTTPS必須、カメラ許可を確認してください。");
     setStatus("起動失敗");
     debugEl.textContent = "起動失敗：HTTPS/権限/端末を確認";
+    running = false;
+    btnStart.disabled = false;
+    btnStop.disabled = true;
   }
 });
 
