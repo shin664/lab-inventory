@@ -252,7 +252,12 @@ zxingHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
   ZXing.BarcodeFormat.AZTEC,
   ZXing.BarcodeFormat.PDF_417
 ]);
-let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints, 500);
+// コンストラクタの第2引数はバージョンにより異なるため省略（互換性向上）
+let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints);
+
+// ZXingキャンバススキャン用（decodeFromVideoElementの代替）
+const zxingCanvas = document.createElement('canvas');
+let zxingTimerId = null;
 
 /* ========= 共通 ========= */
 function setStatus(t){ statusEl.textContent = t; }
@@ -422,19 +427,31 @@ function start1D(){
   });
 }
 
-/* ========= 2D（ZXing） ========= */
+/* ========= 2D（ZXing：キャンバスループ方式） ========= */
+// decodeFromVideoElementはバージョン差や Quagga との競合で動作しないため、
+// 自前の setTimeout ループでキャンバスに描画して decode する方式を採用。
+function zxingScanFrame(){
+  if(!zxingRunning || !running) return;
+
+  if(videoEl.readyState >= 2 && videoEl.videoWidth > 0){
+    const w = videoEl.videoWidth;
+    const h = videoEl.videoHeight;
+    zxingCanvas.width  = w;
+    zxingCanvas.height = h;
+    zxingCanvas.getContext("2d").drawImage(videoEl, 0, 0, w, h);
+    try{
+      const result = zxingReader.decodeFromCanvas(zxingCanvas);
+      if(result) addDetected(result.getText ? result.getText() : result.text);
+    }catch(e){ /* NotFoundException = バーコードなし（正常） */ }
+  }
+
+  zxingTimerId = setTimeout(zxingScanFrame, 300);
+}
+
 async function start2D(){
   if(zxingRunning) return;
   zxingRunning = true;
-
-  // 2Dはvideo elementから読む
-  zxingReader.decodeFromVideoElement(videoEl, (result, err) => {
-    if(!running || !zxingRunning) return;
-    if(result){
-      const raw = result.getText ? result.getText() : result.text;
-      if(raw) addDetected(raw);
-    }
-  });
+  zxingScanFrame();
 }
 
 /* ========= スキャン開始（モード別） ========= */
@@ -472,10 +489,10 @@ async function stopAll(){
     }
   }catch(e){}
 
-  // ZXing停止
-  try{
-    zxingReader?.reset();
-  }catch(e){}
+  // ZXing停止（キャンバスループ）
+  clearTimeout(zxingTimerId);
+  zxingTimerId = null;
+  try{ zxingReader?.reset(); }catch(e){}
   zxingRunning = false;
 
   // カメラ停止
