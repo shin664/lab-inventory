@@ -83,8 +83,7 @@
         }
 
         .tab-content.active {
-            display: flex;
-            flex-direction: column;
+            display: block;
         }
 
         .bottom-nav {
@@ -769,6 +768,93 @@
         @media (min-width: 768px) {
             .summary-grid { grid-template-columns: repeat(4, 1fr); }
         }
+
+        /*
+         * Custom styles for the 入出庫登録フォーム (transaction form).
+         * These rules provide a flexible two‑column layout on larger screens
+         * and stack the sections vertically on small screens. Each panel
+         * includes its own card styling consistent with the rest of the UI.
+         */
+        .txn-container {
+            margin-top: 16px;
+        }
+        .txn-flex {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        @media (min-width: 600px) {
+            .txn-flex {
+                flex-direction: row;
+            }
+        }
+        .item-summary-card,
+        .txn-fields-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            box-shadow: var(--shadow);
+            padding: 16px;
+        }
+        .item-summary-card {
+            flex: 1;
+        }
+        .txn-fields-card {
+            flex: 2;
+        }
+        .item-summary-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+        .txn-type-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .txn-type-btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            border: 2px solid var(--primary);
+            background: var(--surface);
+            color: var(--primary);
+            transition: background 0.3s, color 0.3s, border-color 0.3s;
+        }
+        /* When JS applies inline styles via setTransactionType, they override these defaults.
+           The following classes can be toggled in future to reflect active state visually. */
+        .txn-type-btn.active {
+            background: var(--primary);
+            color: var(--surface);
+        }
+        .txn-type-btn.active-out {
+            background: var(--red);
+            border-color: var(--red);
+            color: var(--surface);
+        }
+        .txn-fields {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+        @media (min-width: 600px) {
+            .txn-fields {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        .txn-action-buttons {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .txn-action-buttons .btn {
+            /* Ensure both buttons share equal width regardless of their content */
+            flex: 1 1 0;
+        }
     </style>
 </head>
 <body>
@@ -910,72 +996,51 @@
             <div id="scannerResult"></div>
 
             <!-- 入出庫登録フォーム -->
-            <div id="transactionForm" class="card" style="display: none;">
-
-                <!-- ① 品目情報 -->
-                <div style="background: var(--primary-light); border: 1.5px solid var(--primary); border-radius: 10px; padding: 12px; margin-bottom: 16px;">
-                    <div style="font-size:11px; font-weight:700; color:var(--primary); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">スキャン品目</div>
-                    <div id="matchedItemDisplay"></div>
+            <div id="transactionForm" class="txn-container" style="display: none;">
+                <!-- Two-column responsive layout: summary on the left, form on the right -->
+                <div class="txn-flex">
+                    <!-- 品目情報カード -->
+                    <div class="item-summary-card">
+                        <div class="item-summary-title">📦 スキャン品目</div>
+                        <div id="matchedItemDisplay"></div>
+                    </div>
+                    <!-- 入庫/出庫 + 主要入力カード -->
+                    <div class="txn-fields-card">
+                        <!-- 入庫 / 出庫 タイプボタン -->
+                        <div class="txn-type-group">
+                            <button id="inButton" onclick="app.setTransactionType('入庫')" class="txn-type-btn">📥 入庫</button>
+                            <button id="outButton" onclick="app.setTransactionType('出庫')" class="txn-type-btn">📤 出庫</button>
+                        </div>
+                        <!-- 入力フィールド -->
+                        <div class="txn-fields">
+                            <div class="form-group">
+                                <label class="form-label">担当者名 <span style="color:var(--red)">*</span></label>
+                                <input type="text" class="form-input" id="transactionPerson" placeholder="例: Fukuda">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">数量 <span style="color:var(--red)">*</span></label>
+                                <input type="number" class="form-input" id="transactionQuantity" placeholder="1" min="1" value="1" inputmode="numeric" style="font-size:22px; font-weight:700; text-align:center; padding:14px;">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">使用期限</label>
+                                <input type="text" class="form-input" id="transactionExpiry" placeholder="YYMMDD" maxlength="6" inputmode="numeric" style="font-family:ui-monospace,monospace; letter-spacing:1.5px; text-align:center;">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">ロット番号</label>
+                                <input type="text" class="form-input" id="transactionLot" placeholder="例: ABC123">
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label class="form-label">コメント</label>
+                                <input type="text" class="form-input" id="transactionComment" placeholder="追記があれば入力...">
+                            </div>
+                        </div>
+                    </div>
                 </div>
-
-                <!-- ② 入庫 / 出庫 切り替え -->
-                <div style="display: flex; gap: 10px; margin-bottom: 16px;">
-                    <button id="inButton" onclick="app.setTransactionType('入庫')"
-                        style="flex:1; padding:14px; font-size:16px; font-weight:700;
-                               border:none; border-radius:10px; cursor:pointer;
-                               background:var(--primary); color:#fff;">
-                        📥 入庫
-                    </button>
-                    <button id="outButton" onclick="app.setTransactionType('出庫')"
-                        style="flex:1; padding:14px; font-size:16px; font-weight:700;
-                               border:2px solid var(--border); border-radius:10px; cursor:pointer;
-                               background:var(--surface); color:var(--text);">
-                        📤 出庫
-                    </button>
+                <!-- 登録・リセットボタン -->
+                <div class="txn-action-buttons">
+                    <button class="btn btn-success" onclick="app.submitTransaction()">✅ 登録する</button>
+                    <button class="btn btn-secondary" onclick="app.resetTransaction()">🔄 リセット</button>
                 </div>
-
-                <!-- ③ フォーム各項目 -->
-                <div class="form-group">
-                    <label class="form-label">担当者名 <span style="color:var(--red)">*</span></label>
-                    <input type="text" class="form-input" id="transactionPerson" placeholder="例: Fukuda">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">数量 <span style="color:var(--red)">*</span></label>
-                    <input type="number" class="form-input" id="transactionQuantity"
-                        placeholder="0" min="1" inputmode="numeric"
-                        style="font-size:20px; font-weight:700; text-align:center;">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">使用期限
-                        <span style="font-size:11px; color:var(--text2); font-weight:normal;">（YYMMDD）</span>
-                    </label>
-                    <input type="text" class="form-input" id="transactionExpiry"
-                        placeholder="例: 260228" maxlength="6" inputmode="numeric"
-                        style="font-family: ui-monospace, monospace; letter-spacing: 2px;">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">ロット番号</label>
-                    <input type="text" class="form-input" id="transactionLot" placeholder="例: ABC123">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">コメント</label>
-                    <textarea class="form-textarea" id="transactionComment"
-                        placeholder="追記があればここに入力..." rows="2"></textarea>
-                </div>
-
-                <!-- ④ 登録・リセットボタン -->
-                <button class="btn btn-success btn-block" onclick="app.submitTransaction()"
-                    style="font-size:16px; padding:16px; margin-bottom:10px;">
-                    ✅ 登録する
-                </button>
-                <button class="btn btn-secondary btn-block" onclick="app.resetTransaction()"
-                    style="font-size:14px;">
-                    🔄 リセット
-                </button>
             </div>
         </div>
 
