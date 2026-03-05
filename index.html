@@ -867,9 +867,12 @@
 
         <!-- Scanner -->
         <div id="scanner" class="tab-content">
-            <div class="card" style="padding: 0; overflow: hidden;">
-                <div style="padding: 12px 16px; border-bottom: 1px solid var(--border);">
-                    <h2 class="card-title" style="margin-bottom: 0;">バーコードスキャナー</h2>
+
+            <!-- カメラカード -->
+            <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 12px;">
+                <div style="padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size:18px;">📷</span>
+                    <span style="font-size:15px; font-weight:700;">バーコードスキャン</span>
                 </div>
 
                 <div id="scannerViewport" style="display: none;">
@@ -885,69 +888,94 @@
                     </div>
                 </div>
 
-                <div class="scanner-controls">
-                    <button class="btn btn-primary" id="btnScanStart" onclick="app.startScanner()">📷 スキャン開始</button>
-                    <button class="btn btn-secondary" id="btnScanStop" onclick="app.stopScanner()" disabled>⏹ 停止</button>
-                    <button class="btn btn-secondary" id="btnTorch" onclick="app.toggleTorch()" style="display: none;">🔦 ライト</button>
+                <div style="padding: 12px 14px; display: flex; gap: 10px;">
+                    <button class="btn btn-primary" id="btnScanStart" onclick="app.startScanner()" style="flex:1;">📷 スキャン開始</button>
+                    <button class="btn btn-secondary" id="btnScanStop" onclick="app.stopScanner()" disabled style="flex:1;">⏹ 停止</button>
+                    <button class="btn btn-secondary" id="btnTorch" onclick="app.toggleTorch()" style="display:none; flex-shrink:0;">🔦</button>
                 </div>
 
-                <div style="padding: 0 16px 16px;">
-                    <label style="font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 6px;">手入力 / 貼り付け</label>
+                <div style="padding: 0 14px 14px;">
+                    <div style="font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px;">手入力 / 貼り付け</div>
                     <div style="display: flex; gap: 8px;">
-                        <input type="text" class="form-input scanner-input" id="barcodeInput" placeholder="バーコードまたは物品コードを入力..." style="flex: 1; margin-bottom: 0;">
-                        <button class="btn btn-primary" onclick="app.manualLookup()" style="white-space: nowrap;">検索</button>
+                        <input type="text" id="barcodeInput" class="form-input"
+                            placeholder="バーコードまたは物品コードを入力..."
+                            style="flex:1; min-width:0; font-size:14px; border: 2px solid var(--primary);">
+                        <button class="btn btn-primary" onclick="app.manualLookup()" style="flex-shrink:0;">検索</button>
                     </div>
-                    <div id="scanDebug" style="font-size: 11px; color: var(--red); margin-top: 6px; min-height: 0;"></div>
+                    <div id="scanDebug" style="font-size:11px; color:var(--red); margin-top:5px;"></div>
                 </div>
             </div>
 
+            <!-- スキャン結果メッセージ -->
             <div id="scannerResult"></div>
 
+            <!-- 入出庫登録フォーム -->
             <div id="transactionForm" class="card" style="display: none;">
-                <h2 class="card-title">入出庫登録</h2>
 
+                <!-- ① 品目情報 -->
+                <div style="background: var(--primary-light); border: 1.5px solid var(--primary); border-radius: 10px; padding: 12px; margin-bottom: 16px;">
+                    <div style="font-size:11px; font-weight:700; color:var(--primary); margin-bottom:8px; text-transform:uppercase; letter-spacing:.5px;">スキャン品目</div>
+                    <div id="matchedItemDisplay"></div>
+                </div>
+
+                <!-- ② 入庫 / 出庫 切り替え -->
+                <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                    <button id="inButton" onclick="app.setTransactionType('入庫')"
+                        style="flex:1; padding:14px; font-size:16px; font-weight:700;
+                               border:none; border-radius:10px; cursor:pointer;
+                               background:var(--primary); color:#fff;">
+                        📥 入庫
+                    </button>
+                    <button id="outButton" onclick="app.setTransactionType('出庫')"
+                        style="flex:1; padding:14px; font-size:16px; font-weight:700;
+                               border:2px solid var(--border); border-radius:10px; cursor:pointer;
+                               background:var(--surface); color:var(--text);">
+                        📤 出庫
+                    </button>
+                </div>
+
+                <!-- ③ フォーム各項目 -->
                 <div class="form-group">
-                    <label class="form-label">品目</label>
-                    <div class="matched-item" id="matchedItemDisplay"></div>
+                    <label class="form-label">担当者名 <span style="color:var(--red)">*</span></label>
+                    <input type="text" class="form-input" id="transactionPerson" placeholder="例: Fukuda">
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">入庫/出庫</label>
-                    <div style="display: flex; gap: 12px;">
-                        <button class="btn" style="flex: 1; background: var(--primary); color: var(--surface);" id="inButton" onclick="app.setTransactionType('入庫')">📥 入庫</button>
-                        <button class="btn" style="flex: 1; background: var(--surface); color: var(--text); border: 2px solid var(--red);" id="outButton" onclick="app.setTransactionType('出庫')">📤 出庫</button>
-                    </div>
+                    <label class="form-label">数量 <span style="color:var(--red)">*</span></label>
+                    <input type="number" class="form-input" id="transactionQuantity"
+                        placeholder="0" min="1" inputmode="numeric"
+                        style="font-size:20px; font-weight:700; text-align:center;">
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">担当者名</label>
-                    <input type="text" class="form-input" id="transactionPerson" placeholder="担当者の名前を入力">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">数量</label>
-                    <input type="number" class="form-input" id="transactionQuantity" placeholder="0" min="0">
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">使用期限 (YYMMDD)</label>
-                    <input type="text" class="form-input" id="transactionExpiry" placeholder="260228">
+                    <label class="form-label">使用期限
+                        <span style="font-size:11px; color:var(--text2); font-weight:normal;">（YYMMDD）</span>
+                    </label>
+                    <input type="text" class="form-input" id="transactionExpiry"
+                        placeholder="例: 260228" maxlength="6" inputmode="numeric"
+                        style="font-family: ui-monospace, monospace; letter-spacing: 2px;">
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">ロット番号</label>
-                    <input type="text" class="form-input" id="transactionLot" placeholder="ロット番号">
+                    <input type="text" class="form-input" id="transactionLot" placeholder="例: ABC123">
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">コメント</label>
-                    <textarea class="form-textarea" id="transactionComment" placeholder="追記があればここに入力..."></textarea>
+                    <textarea class="form-textarea" id="transactionComment"
+                        placeholder="追記があればここに入力..." rows="2"></textarea>
                 </div>
 
-                <div class="form-group">
-                    <button class="btn btn-success btn-block" onclick="app.submitTransaction()">✅ 登録</button>
-                    <button class="btn btn-secondary btn-block" onclick="app.resetTransaction()">🔄 リセット</button>
-                </div>
+                <!-- ④ 登録・リセットボタン -->
+                <button class="btn btn-success btn-block" onclick="app.submitTransaction()"
+                    style="font-size:16px; padding:16px; margin-bottom:10px;">
+                    ✅ 登録する
+                </button>
+                <button class="btn btn-secondary btn-block" onclick="app.resetTransaction()"
+                    style="font-size:14px;">
+                    🔄 リセット
+                </button>
             </div>
         </div>
 
@@ -1499,7 +1527,7 @@
                 if (matched) {
                     this.currentScanItem = matched;
                     this.displayScanResult(matched);
-                    document.getElementById('transactionForm').style.display = 'flex';
+                    document.getElementById('transactionForm').style.display = 'block';
                 } else {
                     document.getElementById('scannerResult').innerHTML = `
                         <div class="card">
@@ -1513,29 +1541,24 @@
             }
 
             displayScanResult(item) {
+                const expiryStr = this.formatDate(item['入庫後最新使用期限(日付)']);
                 const html = `
-                    <div class="matched-item-field">
-                        <span class="matched-item-label">品目名:</span>
-                        <span class="matched-item-value">${item['物品名']}</span>
+                    <div style="font-size:16px; font-weight:700; color:var(--text); margin-bottom:8px; line-height:1.4;">
+                        ${item['物品名']}
                     </div>
-                    <div class="matched-item-field">
-                        <span class="matched-item-label">メーカー:</span>
-                        <span class="matched-item-value">${item['メーカー']}</span>
-                    </div>
-                    <div class="matched-item-field">
-                        <span class="matched-item-label">規格:</span>
-                        <span class="matched-item-value">${item['規格']}</span>
-                    </div>
-                    <div class="matched-item-field">
-                        <span class="matched-item-label">現在在庫:</span>
-                        <span class="matched-item-value">${item['在庫数']} 個</span>
-                    </div>
-                    <div class="matched-item-field">
-                        <span class="matched-item-label">コード:</span>
-                        <span class="matched-item-value">${item['コード']}</span>
+                    <div style="display:grid; grid-template-columns:4em 1fr; gap:4px 8px; font-size:13px;">
+                        <span style="color:var(--text2); font-weight:600;">メーカー</span>
+                        <span>${item['メーカー'] || '―'}</span>
+                        <span style="color:var(--text2); font-weight:600;">規格</span>
+                        <span>${item['規格'] || '―'}</span>
+                        <span style="color:var(--text2); font-weight:600;">現在庫</span>
+                        <span style="font-weight:700; color:var(--primary);">${item['在庫数']} 個</span>
+                        <span style="color:var(--text2); font-weight:600;">使用期限</span>
+                        <span>${expiryStr || '―'}</span>
+                        <span style="color:var(--text2); font-weight:600;">コード</span>
+                        <span style="font-family:monospace;">${item['コード']}</span>
                     </div>
                 `;
-
                 document.getElementById('matchedItemDisplay').innerHTML = html;
             }
 
@@ -1545,15 +1568,11 @@
                 const outBtn = document.getElementById('outButton');
 
                 if (type === '入庫') {
-                    inBtn.style.background = 'var(--primary)';
-                    inBtn.style.color = 'var(--surface)';
-                    outBtn.style.background = 'var(--surface)';
-                    outBtn.style.color = 'var(--text)';
+                    inBtn.style.cssText  = 'flex:1; padding:14px; font-size:16px; font-weight:700; border:none; border-radius:10px; cursor:pointer; background:var(--primary); color:#fff;';
+                    outBtn.style.cssText = 'flex:1; padding:14px; font-size:16px; font-weight:700; border:2px solid var(--border); border-radius:10px; cursor:pointer; background:var(--surface); color:var(--text);';
                 } else {
-                    inBtn.style.background = 'var(--surface)';
-                    inBtn.style.color = 'var(--text)';
-                    outBtn.style.background = 'var(--red)';
-                    outBtn.style.color = 'var(--surface)';
+                    inBtn.style.cssText  = 'flex:1; padding:14px; font-size:16px; font-weight:700; border:2px solid var(--border); border-radius:10px; cursor:pointer; background:var(--surface); color:var(--text);';
+                    outBtn.style.cssText = 'flex:1; padding:14px; font-size:16px; font-weight:700; border:none; border-radius:10px; cursor:pointer; background:var(--red); color:#fff;';
                 }
             }
 
