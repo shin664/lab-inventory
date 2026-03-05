@@ -4,591 +4,776 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>在庫スキャナ（GS1-128 / DataMatrix / QR）</title>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>在庫スキャナ</title>
 
-  <!-- 1D(Code128/GS1-128)に強い -->
+  <!-- 1D (GS1-128 / Code128) -->
   <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
-  <!-- 2D(QR/DataMatrix等)に強い -->
+  <!-- 2D (QR / GS1 DataMatrix) -->
   <script src="https://unpkg.com/@zxing/library@latest"></script>
 
   <style>
-    :root{
-      --bg:#0b1220; --card:#111b2e; --txt:#e6edf7; --sub:#9bb0d1;
-      --btn:#2b6cff; --btn2:rgba(255,255,255,0.08); --danger:#ff4d4d;
-      --ok:#a7ffbf; --warn:#ffd28a;
+    /* ── Design tokens ── */
+    :root {
+      --primary:       #1555c8;
+      --primary-dark:  #0e429e;
+      --primary-light: #eaf0fd;
+      --bg:            #f0f4f9;
+      --surface:       #ffffff;
+      --surface2:      #f7f9fc;
+      --border:        #d8e2ee;
+      --text:          #18222e;
+      --text2:         #576778;
+      --green:         #0a9e6c;
+      --green-bg:      #e5f7ef;
+      --amber:         #b86d00;
+      --amber-bg:      #fef3d0;
+      --red:           #c72020;
+      --red-bg:        #fde8e8;
+      --r:             14px;
+      --r-sm:          10px;
+      --shadow:        0 1px 6px rgba(0,0,0,0.08);
     }
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif;background:var(--bg);color:var(--txt);}
-    header{padding:14px 16px;background:linear-gradient(180deg,#0f1a33,#0b1220);position:sticky;top:0;z-index:5}
-    h1{font-size:16px;margin:0 0 6px 0}
-    .sub{font-size:12px;color:var(--sub);line-height:1.4}
-    .wrap{padding:14px 16px;max-width:1100px;margin:0 auto}
-    .grid{display:grid;gap:12px}
-    @media (min-width:920px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
-    .card{background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px}
-    #viewport{position:relative;border-radius:12px;overflow:hidden;background:#000}
-    video{width:100%;display:block;aspect-ratio: 3/4;object-fit:cover;background:#000}
-    canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
-    .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
-    button{
-      border:0;border-radius:12px;padding:11px 12px;font-size:14px;
-      background:var(--btn2);color:var(--txt);cursor:pointer
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+                   "Noto Sans JP", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
     }
-    button.primary{background:var(--btn)}
-    button.danger{background:rgba(255,77,77,0.18);color:#ffd2d2}
-    button:disabled{opacity:.55;cursor:not-allowed}
-    select,input{
-      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
+
+    /* ── Header ── */
+    header {
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      padding-top: max(12px, env(safe-area-inset-top));
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.22);
     }
-    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
-    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:11px;color:var(--sub)}
-    .hint{font-size:12px;color:var(--sub);line-height:1.5;margin:10px 0 0}
-    .ok{color:var(--ok)} .warn{color:var(--warn)}
-    table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-    th,td{border-bottom:1px solid rgba(255,255,255,0.10);padding:8px 6px;vertical-align:top}
-    th{color:var(--sub);text-align:left;font-weight:600}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    .small{font-size:11px;color:var(--sub)}
-    .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin-top:8px}
-    .kv div{padding:6px 8px;border-radius:10px;background:rgba(255,255,255,0.06)}
+    .hdr-icon {
+      width: 40px; height: 40px;
+      background: rgba(255,255,255,0.18);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    header h1   { font-size: 17px; font-weight: 700; line-height: 1.2; }
+    header .sub { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+
+    /* ── Layout ── */
+    .page  { padding: 16px; max-width: 1140px; margin: 0 auto; }
+    .grid  { display: grid; gap: 16px; }
+    @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border-radius: var(--r);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-hdr {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 16px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      font-size: 14px; font-weight: 700;
+    }
+    .card-hdr .ml { margin-left: auto; display: flex; gap: 8px; }
+
+    /* ── Camera viewport ── */
+    #viewport {
+      position: relative;
+      background: #0a0a0a;
+      overflow: hidden;
+      aspect-ratio: 3/4;
+    }
+    @media (min-width: 860px) { #viewport { aspect-ratio: 4/3; } }
+
+    video {
+      width: 100%; height: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
+    canvas#overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+
+    /* Scan-frame brackets */
+    .sf {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80%; height: 26%;
+      pointer-events: none;
+      /* dim area outside */
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.38);
+      border-radius: 4px;
+    }
+    .sf::before, .sf::after,
+    .sf-b::before, .sf-b::after {
+      content: ''; position: absolute;
+      width: 24px; height: 24px;
+      border-color: #34d399; border-style: solid;
+    }
+    .sf::before  { top:-2px;    left:-2px;  border-width: 3px 0 0 3px; border-radius: 5px 0 0 0; }
+    .sf::after   { top:-2px;    right:-2px; border-width: 3px 3px 0 0; border-radius: 0 5px 0 0; }
+    .sf-b::before { bottom:-2px; left:-2px;  border-width: 0 0 3px 3px; border-radius: 0 0 0 5px; }
+    .sf-b::after  { bottom:-2px; right:-2px; border-width: 0 3px 3px 0; border-radius: 0 0 5px 0; }
+
+    /* Animated scan line */
+    .scan-line {
+      position: absolute;
+      left: 4px; right: 4px; height: 2px;
+      background: linear-gradient(90deg, transparent, #34d399 30%, #34d399 70%, transparent);
+      animation: scanAnim 2s linear infinite;
+    }
+    @keyframes scanAnim {
+      0%   { top: 8%;  opacity: 0; }
+      8%   {           opacity: 1; }
+      92%  {           opacity: 1; }
+      100% { top: 92%; opacity: 0; }
+    }
+
+    /* Camera status bar */
+    .cam-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      padding: 10px 14px;
+      background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: #666; flex-shrink: 0;
+      transition: background .3s, box-shadow .3s;
+    }
+    .dot.scanning {
+      background: #4ade80;
+      box-shadow: 0 0 7px #4ade80;
+      animation: blink 1.5s infinite;
+    }
+    .dot.error { background: #f87171; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+    #statusText { color: #fff; font-size: 13px; font-weight: 500; }
+
+    /* ── Controls ── */
+    .controls { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+    .row      { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    button {
+      border: none; border-radius: var(--r-sm);
+      padding: 9px 15px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: .12s;
+      display: inline-flex; align-items: center; gap: 5px;
+      white-space: nowrap;
+    }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+    .btn-p { background: var(--primary); color: #fff; }
+    .btn-p:not(:disabled):active { background: var(--primary-dark); }
+    .btn-s { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-s:not(:disabled):active { background: var(--border); }
+    .btn-g { background: var(--green-bg); color: var(--green); border: 1px solid #86efac; }
+    .btn-d { background: var(--red-bg);   color: var(--red);   border: 1px solid #fca5a5; }
+
+    .fl { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; display: block; }
+    select, input[type=text] {
+      width: 100%; padding: 9px 11px;
+      border: 1px solid var(--border); border-radius: var(--r-sm);
+      background: var(--surface); color: var(--text);
+      font-size: 13px; outline: none;
+    }
+    select:focus, input[type=text]:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-light);
+    }
+    input[type=range] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+
+    /* ── Last-scan result box ── */
+    #resultBox {
+      margin: 0 16px 14px;
+      padding: 10px 13px;
+      background: var(--green-bg);
+      border: 1px solid #6ee7b7;
+      border-radius: var(--r-sm);
+      display: none;
+    }
+    #resultBox.show { display: block; }
+    .res-head { font-size: 11px; font-weight: 700; color: var(--green); margin-bottom: 7px; }
+    .res-grid {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 3px 8px;
+      font-size: 12px;
+    }
+    .res-k { color: var(--text2); font-weight: 600; display: flex; align-items: center; }
+    .res-v { font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+
+    /* ── Hint box ── */
+    .hint {
+      background: var(--amber-bg);
+      border: 1px solid #fde68a;
+      border-radius: var(--r-sm);
+      padding: 10px 12px;
+      font-size: 12px; color: var(--amber); line-height: 1.7;
+    }
+    .hint strong { color: #7c4e00; }
+
+    /* ── History table ── */
+    .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th {
+      background: var(--surface2);
+      color: var(--text2); font-weight: 700;
+      text-align: left;
+      padding: 9px 8px;
+      border-bottom: 2px solid var(--border);
+      white-space: nowrap;
+    }
+    td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:nth-child(even) td { background: var(--surface2); }
+    .mono { font-family: ui-monospace, Menlo, monospace; }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 40px 0; color: var(--text2); font-size: 13px; }
+    .empty .ei { font-size: 38px; margin-bottom: 10px; }
+
+    #debug { font-size: 11px; color: var(--red); min-height: 0; }
   </style>
 </head>
-
 <body>
+
 <header>
-  <h1>在庫スキャナ（GS1-128 / QR / GS1 DataMatrix）</h1>
-  <div class="sub">背面カメラ固定。1DはQuagga2、2DはZXingで読み取り率を最大化。CSV出力＋GS1(01)(17)(10)分解。</div>
+  <div class="hdr-icon">🔬</div>
+  <div>
+    <h1>在庫スキャナ</h1>
+    <div class="sub">GS1-128 / QR / GS1 DataMatrix 対応</div>
+  </div>
 </header>
 
-<div class="wrap">
-  <div class="grid">
+<div class="page">
+<div class="grid">
 
-    <!-- 左：カメラ -->
-    <div class="card">
-      <div id="viewport">
-        <video id="video" playsinline></video>
-        <canvas id="overlay"></canvas>
+  <!-- ── Camera card ── -->
+  <div class="card">
+    <div class="card-hdr">📷 <span>カメラスキャン</span></div>
+
+    <div id="viewport">
+      <video id="video" playsinline autoplay muted></video>
+      <canvas id="overlay"></canvas>
+
+      <!-- Scan-frame (shown after camera starts) -->
+      <div class="sf" id="scanFrame" style="display:none">
+        <div class="sf-b"></div>
+        <div class="scan-line"></div>
       </div>
 
-      <div class="row">
-        <button class="primary" id="btnStart">開始（背面カメラ）</button>
-        <button id="btnStop" disabled>停止</button>
-        <button id="btnTorch" disabled>ライト</button>
-        <span class="pill" id="status">待機中</span>
+      <div class="cam-bar">
+        <div class="dot" id="statusDot"></div>
+        <span id="statusText">待機中 — 開始を押してください</span>
       </div>
-
-      <label>スキャンモード</label>
-      <select id="mode">
-        <option value="auto" selected>自動（おすすめ：1D+2D）</option>
-        <option value="1d">1Dのみ（GS1-128/Code128専用）</option>
-        <option value="2d">2Dのみ（QR/GS1 DataMatrix専用）</option>
-      </select>
-
-      <label>ズーム（対応端末のみ）</label>
-      <input id="zoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
-      <div class="small" id="zoomInfo">ズーム：未対応</div>
-
-      <label>手入力 / 貼り付け（Cognexの ]C1… もOK）</label>
-      <input id="manual" class="mono" placeholder="例：]C101049123456789031724033110ABC123" />
-      <div class="row">
-        <button id="btnManual">解析して履歴に追加</button>
-      </div>
-
-      <p class="hint">
-        <span class="ok">✅ 現場で一番効く設定：</span>バーコードが画面幅の<strong>1/2以上</strong>に入る距離（いまの条件OK）＋ブレなし。<br/>
-        <span class="warn">⚠ 読めない時の最優先：</span>反射（ラミネート）→角度を少し変える / ライトOFFも試す / 机固定。
-      </p>
-
-      <p class="small" id="debug"></p>
     </div>
 
-    <!-- 右：結果 -->
-    <div class="card">
-      <div class="row">
-        <button class="primary" id="btnCsv">CSVダウンロード</button>
-        <button class="danger" id="btnClear">履歴クリア</button>
+    <!-- Last-scan result -->
+    <div id="resultBox">
+      <div class="res-head">✅ 読み取り成功</div>
+      <div class="res-grid">
+        <span class="res-k">RAW</span>      <span class="res-v" id="lastRaw"></span>
+        <span class="res-k">GTIN (01)</span><span class="res-v" id="lastGTIN"></span>
+        <span class="res-k">期限 (17)</span><span class="res-v" id="lastEXP"></span>
+        <span class="res-k">LOT (10)</span>  <span class="res-v" id="lastLOT"></span>
       </div>
-
-      <div class="kv">
-        <div class="small">直近RAW</div><div class="mono" id="lastRaw"></div>
-        <div class="small">GTIN(01)</div><div class="mono" id="lastGTIN"></div>
-        <div class="small">期限(17)</div><div class="mono" id="lastEXP"></div>
-        <div class="small">LOT(10)</div><div class="mono" id="lastLOT"></div>
-      </div>
-
-      <label>履歴（最新が下）</label>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:140px">時刻</th>
-            <th style="width:160px">GTIN(01)</th>
-            <th style="width:110px">期限(17)</th>
-            <th style="width:140px">LOT(10)</th>
-            <th>生データ</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
-
-      <p class="hint">
-        CSV列：time,gtin,exp,lot,raw<br/>
-        exp は YYMMDD → 20YY-MM-DD（年は2000年代扱い）
-      </p>
     </div>
 
+    <div class="controls">
+      <div class="row">
+        <button class="btn-p" id="btnStart">▶ 開始</button>
+        <button class="btn-s" id="btnStop"  disabled>⏹ 停止</button>
+        <button class="btn-s" id="btnTorch" disabled>🔦 ライト</button>
+      </div>
+
+      <div>
+        <label class="fl">スキャンモード</label>
+        <select id="mode">
+          <option value="auto" selected>自動（推奨：1D + 2D）</option>
+          <option value="1d">1Dのみ（GS1-128 / Code128）</option>
+          <option value="2d">2Dのみ（QR / GS1 DataMatrix）</option>
+        </select>
+      </div>
+
+      <div id="zoomSection" style="display:none">
+        <div class="row" style="margin-bottom:4px">
+          <label class="fl" style="margin:0">ズーム</label>
+          <span style="font-size:11px;color:var(--text2)" id="zoomVal">1.0×</span>
+        </div>
+        <input id="zoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
+      </div>
+
+      <div>
+        <label class="fl">手入力 / 貼り付け（Cognex の ]C1… もOK）</label>
+        <div class="row">
+          <input id="manual" type="text" class="mono"
+                 placeholder="]C101049123456789031724033110ABC123"
+                 style="flex:1;min-width:0" />
+          <button class="btn-s" id="btnManual">解析</button>
+        </div>
+      </div>
+
+      <div class="hint">
+        <strong>読み取りのコツ：</strong><br>
+        ・バーコードを枠内に収め、画面幅の ½ 以上に拡大する<br>
+        ・ラミネート反射 → 少し角度を変える / ライト OFF も試す<br>
+        ・ブレないよう静止させる（机固定が効果的）
+      </div>
+
+      <div id="debug"></div>
+    </div>
   </div>
-</div>
+
+  <!-- ── History card ── -->
+  <div class="card">
+    <div class="card-hdr">
+      📋 <span>スキャン履歴</span>
+      <div class="ml">
+        <button class="btn-g" id="btnCsv">⬇ CSV</button>
+        <button class="btn-d" id="btnClear">🗑 クリア</button>
+      </div>
+    </div>
+
+    <div style="padding:16px">
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>時刻</th>
+              <th>GTIN (01)</th>
+              <th>期限 (17)</th>
+              <th>LOT (10)</th>
+              <th>生データ</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="5">
+              <div class="empty">
+                <div class="ei">📦</div>
+                スキャン履歴はありません
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:11px;color:var(--text2);margin-top:10px">
+        CSV列：time / gtin / exp / lot / raw　（exp は YYMMDD → 20YY-MM-DD）
+      </p>
+    </div>
+  </div>
+
+</div><!-- .grid -->
+</div><!-- .page -->
 
 <script>
-/* ========= 運用パラメータ ========= */
-const SCAN_COOLDOWN_MS = 1200; // 同一コードの連続登録防止
+/* ===== 定数 ===== */
+const COOLDOWN = 1200;   // 同一コード連続登録防止 ms
 const MAX_ROWS = 500;
+const GS       = String.fromCharCode(29);
 
-/* ========= GS1パーサ（01/17/10） ========= */
-const GS = String.fromCharCode(29);
-
-function normalizeRaw(raw){
-  if(!raw) return "";
+/* ===== GS1 パーサー (01/17/10) ===== */
+function normalizeRaw(raw) {
+  if (!raw) return '';
   raw = raw.trim();
-  // Symbology Identifier 除去（Cognex等）
-  if(raw.startsWith("]C1") || raw.startsWith("]c1")) raw = raw.slice(3);
-  if(raw.startsWith("]E0") || raw.startsWith("]e0")) raw = raw.slice(3);
-  // (01)形式簡易対応
-  raw = raw.replace(/\(/g,"").replace(/\)/g,"");
-  return raw;
+  if (/^\]([Cc]1|[Ee]0)/.test(raw)) raw = raw.slice(3);
+  return raw.replace(/\(/g, '').replace(/\)/g, '');
 }
-function formatYYMMDD(yymmdd){
-  if(!/^\d{6}$/.test(yymmdd)) return "";
-  const yy = parseInt(yymmdd.slice(0,2),10);
-  const mm = yymmdd.slice(2,4);
-  const dd = yymmdd.slice(4,6);
-  const yyyy = 2000 + yy;
-  return `${yyyy}-${mm}-${dd}`;
+function fmtYYMMDD(s) {
+  if (!/^\d{6}$/.test(s)) return '';
+  return `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`;
 }
-function parseGS1(rawInput){
-  const s = normalizeRaw(rawInput);
-  const out = { gtin:"", exp:"", lot:"" };
+function parseGS1(rawInput) {
+  const s   = normalizeRaw(rawInput);
+  const out = { gtin:'', exp:'', lot:'' };
   let i = 0;
-  while(i < s.length){
-    if(s[i] === GS){ i++; continue; }
+  while (i < s.length) {
+    if (s[i] === GS) { i++; continue; }
     const a2 = s.slice(i, i+2);
-    // --- 対象AI ---
-    if(a2 === "01"){
-      const v = s.slice(i+2, i+16);
-      if(/^\d{14}$/.test(v)) out.gtin = v;
-      i += 16; continue;
+    if (a2 === '01') { const v = s.slice(i+2, i+16); if (/^\d{14}$/.test(v)) out.gtin = v; i += 16; continue; }
+    if (a2 === '17') { const v = s.slice(i+2, i+8);  if (/^\d{6}$/.test(v))  out.exp  = fmtYYMMDD(v); i += 8; continue; }
+    if (a2 === '10') {
+      const st = i+2, gp = s.indexOf(GS, st);
+      const en = gp !== -1 ? gp : Math.min(st+20, s.length);
+      out.lot = s.slice(st, en); i = en; continue;
     }
-    if(a2 === "17"){
-      const v = s.slice(i+2, i+8);
-      if(/^\d{6}$/.test(v)) out.exp = formatYYMMDD(v);
-      i += 8; continue;
-    }
-    if(a2 === "10"){
-      const st = i+2;
-      const gsP = s.indexOf(GS, st);
-      const en = gsP !== -1 ? gsP : Math.min(st+20, s.length);
-      out.lot = s.slice(st, en);
-      i = en; continue;
-    }
-    // --- 既知固定長AIをスキップ（誤認識防止） ---
-    if(a2 === "00"){ i += 20; continue; }  // SSCC
-    if(a2 === "02"){ i += 16; continue; }  // GTIN(内容物)
-    if(["11","12","13","15","16","18","19","20"].includes(a2)){ i += 8; continue; }
-    // シリアル番号 AI21（可変長）
-    if(a2 === "21"){ const st=i+2; const gsP=s.indexOf(GS,st); i=gsP!==-1?gsP:Math.min(st+20,s.length); continue; }
-    // 3x系（重量・寸法）：AI4桁+データ6桁
-    if(/^3[1-6]/.test(a2)){ i += 10; continue; }
-    // --- 不明AI → 次のGSまでスキップ（i++より安全） ---
-    const nextGS = s.indexOf(GS, i);
-    if(nextGS !== -1){ i = nextGS; } else { break; }
+    if (a2 === '00') { i += 20; continue; }
+    if (a2 === '02') { i += 16; continue; }
+    if (['11','12','13','15','16','18','19','20'].includes(a2)) { i += 8; continue; }
+    if (a2 === '21') { const st=i+2, gp=s.indexOf(GS,st); i = gp!==-1?gp:Math.min(st+20,s.length); continue; }
+    if (/^3[1-6]/.test(a2)) { i += 10; continue; }
+    const ng = s.indexOf(GS, i);
+    if (ng !== -1) { i = ng; } else break;
   }
   return out;
 }
 
-/* ========= UI参照 ========= */
-const videoEl = document.getElementById("video");
-const overlay = document.getElementById("overlay");
-const ctx = overlay.getContext("2d");
+/* ===== DOM 参照 ===== */
+const videoEl    = document.getElementById('video');
+const overlay    = document.getElementById('overlay');
+const ctx        = overlay.getContext('2d');
+const btnStart   = document.getElementById('btnStart');
+const btnStop    = document.getElementById('btnStop');
+const btnTorch   = document.getElementById('btnTorch');
+const statusDot  = document.getElementById('statusDot');
+const statusTxt  = document.getElementById('statusText');
+const modeEl     = document.getElementById('mode');
+const zoomEl     = document.getElementById('zoom');
+const zoomVal    = document.getElementById('zoomVal');
+const zoomSec    = document.getElementById('zoomSection');
+const manualEl   = document.getElementById('manual');
+const debugEl    = document.getElementById('debug');
+const resultBox  = document.getElementById('resultBox');
+const lastRawEl  = document.getElementById('lastRaw');
+const lastGTINEl = document.getElementById('lastGTIN');
+const lastEXPEl  = document.getElementById('lastEXP');
+const lastLOTEl  = document.getElementById('lastLOT');
+const tbody      = document.getElementById('tbody');
+const scanFrame  = document.getElementById('scanFrame');
 
-const btnStart = document.getElementById("btnStart");
-const btnStop  = document.getElementById("btnStop");
-const btnTorch = document.getElementById("btnTorch");
-const statusEl = document.getElementById("status");
-const modeEl   = document.getElementById("mode");
+/* ===== 状態 ===== */
+let rows = [], lastSeen = new Map();
+let stream = null, track = null, torchOn = false;
+let running = false, quaggaRunning = false, zxingRunning = false;
 
-const zoomEl = document.getElementById("zoom");
-const zoomInfo = document.getElementById("zoomInfo");
-
-const manualEl = document.getElementById("manual");
-const debugEl = document.getElementById("debug");
-
-const lastRawEl = document.getElementById("lastRaw");
-const lastGTINEl = document.getElementById("lastGTIN");
-const lastEXPEl = document.getElementById("lastEXP");
-const lastLOTEl = document.getElementById("lastLOT");
-
-const tbody = document.getElementById("tbody");
-
-/* ========= 状態 ========= */
-let rows = [];
-let lastSeen = new Map();
-
-let stream = null;
-let track = null;
-let torchOn = false;
-
-let running = false;
-let quaggaRunning = false;
-let zxingRunning = false;
-
-/* ZXing（CODE_128追加 — GS1-128対応の重要修正） */
+/* ===== ZXing セットアップ ===== */
 const zxingHints = new Map();
 zxingHints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 zxingHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-  ZXing.BarcodeFormat.CODE_128,    // GS1-128はCode128の一種（必須）
+  ZXing.BarcodeFormat.CODE_128,
   ZXing.BarcodeFormat.QR_CODE,
   ZXing.BarcodeFormat.DATA_MATRIX,
   ZXing.BarcodeFormat.AZTEC,
   ZXing.BarcodeFormat.PDF_417
 ]);
-// コンストラクタの第2引数はバージョンにより異なるため省略（互換性向上）
-let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints);
-
-// ZXingキャンバススキャン用（decodeFromVideoElementの代替）
+let zxingReader  = new ZXing.BrowserMultiFormatReader(zxingHints);
 const zxingCanvas = document.createElement('canvas');
-let zxingTimerId = null;
+let zxTimer = null;
 
-/* ========= 共通 ========= */
-function setStatus(t){ statusEl.textContent = t; }
-function escapeHtml(s){
-  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-function csvEscape(v){
-  const s = String(v ?? "");
-  if(/[",\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
-  return s;
-}
+/* ===== Quagga2 コマ送り用キャンバス ===== */
+const q2Canvas = document.createElement('canvas');
+let q2Timer = null;
 
-function render(){
-  tbody.innerHTML = "";
-  for(const r of rows){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${escapeHtml(r.time)}</td>
-      <td class="mono">${escapeHtml(r.gtin)}</td>
-      <td class="mono">${escapeHtml(r.exp)}</td>
-      <td class="mono">${escapeHtml(r.lot)}</td>
-      <td class="mono">${escapeHtml(r.raw)}</td>
-    `;
-    tbody.appendChild(tr);
-  }
+/* ===== ユーティリティ ===== */
+function setStatus(msg, state = 'idle') {
+  statusTxt.textContent   = msg;
+  statusDot.className     = 'dot' + (state === 'scanning' ? ' scanning'
+                                    : state === 'error'    ? ' error' : '');
+}
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function csvEsc(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
 }
 
-function addDetected(raw){
-  if(!raw) return;
-  const nowMs = Date.now();
-  const last = lastSeen.get(raw) || 0;
-  if(nowMs - last < SCAN_COOLDOWN_MS) return;
-  lastSeen.set(raw, nowMs);
-
-  const parsed = parseGS1(raw);
-  const time = new Date().toLocaleString();
-
-  const rec = { time, gtin:parsed.gtin, exp:parsed.exp, lot:parsed.lot, raw };
-  rows.push(rec);
-  if(rows.length > MAX_ROWS) rows.shift();
-
-  // 直近表示
-  lastRawEl.textContent  = raw;
-  lastGTINEl.textContent = parsed.gtin || "";
-  lastEXPEl.textContent  = parsed.exp  || "";
-  lastLOTEl.textContent  = parsed.lot  || "";
-
-  // バイブ
-  if(navigator.vibrate) navigator.vibrate(30);
-
-  // 簡易ビープ
-  try{
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ac.createOscillator(); const g = ac.createGain();
-    o.frequency.value = 880; g.gain.value = 0.02;
-    o.connect(g); g.connect(ac.destination);
-    o.start(); setTimeout(()=>{ o.stop(); ac.close(); }, 80);
-  }catch(e){}
-
-  setStatus("読み取りOK");
-  render();
+function resizeOverlay() {
+  const r = videoEl.getBoundingClientRect();
+  overlay.width  = Math.floor(r.width  * devicePixelRatio);
+  overlay.height = Math.floor(r.height * devicePixelRatio);
+  overlay.style.width  = r.width  + 'px';
+  overlay.style.height = r.height + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 }
+window.addEventListener('resize', resizeOverlay);
 
-function resizeOverlay(){
-  const rect = videoEl.getBoundingClientRect();
-  overlay.width = Math.floor(rect.width * devicePixelRatio);
-  overlay.height = Math.floor(rect.height * devicePixelRatio);
-  overlay.style.width = rect.width + "px";
-  overlay.style.height = rect.height + "px";
-  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
-}
-window.addEventListener("resize", resizeOverlay);
-
-/* ========= トーチ・ズーム初期化（trackセット後に呼ぶ） ========= */
-function setupTorchZoom(){
-  if(!track) return;
+function setupTorchZoom() {
+  if (!track) return;
   const caps = track.getCapabilities?.() || {};
   btnTorch.disabled = !caps.torch;
-  if(caps.zoom){
+  if (caps.zoom) {
     zoomEl.disabled = false;
     zoomEl.min   = caps.zoom.min;
     zoomEl.max   = caps.zoom.max;
     zoomEl.step  = caps.zoom.step || 0.1;
     zoomEl.value = caps.zoom.min;
-    zoomInfo.textContent = `ズーム：対応（${caps.zoom.min}〜${caps.zoom.max}）`;
-  }else{
+    zoomVal.textContent = `${Number(caps.zoom.min).toFixed(1)}×`;
+    zoomSec.style.display = 'block';
+  } else {
     zoomEl.disabled = true;
-    zoomInfo.textContent = "ズーム：未対応";
+    zoomSec.style.display = 'none';
   }
 }
 
-/* ========= カメラ手動開始（2Dモード専用） ========= */
-async function startCamera(){
-  setStatus("カメラ起動中…");
+/* ===== カメラ起動（常に getUserMedia で直接制御） ===== */
+async function startCamera() {
+  setStatus('カメラ起動中…');
   const constraints = {
     audio: false,
     video: {
-      facingMode: { ideal: "environment" },
-      width:  { ideal: 1920 },
-      height: { ideal: 1080 },
+      facingMode: { ideal: 'environment' },
+      width:     { ideal: 1920 },
+      height:    { ideal: 1080 },
       frameRate: { ideal: 30, max: 30 }
     }
   };
   stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+  // srcObject をセットしてから必ず play() を呼ぶ（黒画面防止の核心）
   videoEl.srcObject = stream;
-  await videoEl.play().catch(()=>{});
+  await videoEl.play().catch(() => {});
+
+  // videoWidth が確定するまで待つ
+  await new Promise(resolve => {
+    if (videoEl.videoWidth > 0) { resolve(); return; }
+    const onReady = () => { videoEl.removeEventListener('loadeddata', onReady); resolve(); };
+    videoEl.addEventListener('loadeddata', onReady);
+    setTimeout(resolve, 2500); // フォールバック
+  });
+
   track = stream.getVideoTracks()[0] || null;
   resizeOverlay();
   setupTorchZoom();
+  scanFrame.style.display = 'block';
 }
 
-/* ========= 1D（Quagga2：GS1-128/Code128） ========= */
-function start1D(){
-  if(quaggaRunning) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    // イベントハンドラはinit前に登録（二重登録防止）
-    Quagga.offDetected();
-    Quagga.offProcessed();
-    Quagga.onDetected((data) => {
-      const raw = data?.codeResult?.code;
-      if(raw && raw.length >= 4) addDetected(raw);  // 短すぎる誤読を除外
-    });
-    Quagga.onProcessed(() => {
-      try { ctx.clearRect(0, 0, overlay.width, overlay.height); } catch(e){}
-    });
+/* ===== 1D スキャン（Quagga2 を decodeSingle で使用） ===== */
+function start1D() {
+  if (typeof Quagga === 'undefined' || typeof Quagga.decodeSingle !== 'function') {
+    debugEl.textContent = '⚠ Quagga2 ライブラリが読み込まれていません。1D スキャンは無効です。';
+    return;
+  }
+  quaggaRunning = true;
+  q2Tick();
+}
 
-    Quagga.init({
-      inputStream: {
-        type: "LiveStream",
-        target: videoEl,  // 既存video要素を直接使用（カメラ二重起動を防ぐ）
-        constraints: {
-          facingMode: { ideal: "environment" },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 }
-        }
-      },
-      decoder: {
-        readers: ["code_128_reader"],  // GS1-128 = Code128
-        multiple: false
-      },
-      locator: {
-        patchSize: "medium",  // 認識精度向上（small/medium/large/x-large）
-        halfSample: true
-      },
-      locate: true,
-      numOfWorkers: Math.min(4, navigator.hardwareConcurrency || 2)
-    }, async (err) => {
-      if(err){
-        console.error(err);
-        debugEl.textContent = "1D初期化失敗：HTTPS/カメラ許可/端末を確認";
-        reject(err);
-        return;
-      }
-      Quagga.start();
-      quaggaRunning = true;
-      // Quaggaがvideo要素にstreamを設定するまで待機
-      await new Promise(r => setTimeout(r, 400));
-      if(videoEl.srcObject instanceof MediaStream){
-        stream = videoEl.srcObject;
-        track  = stream.getVideoTracks()[0] || null;
-        setupTorchZoom();
-        resizeOverlay();
-      }
-      resolve();
-    });
+function q2Tick() {
+  if (!quaggaRunning || !running) return;
+  const w = videoEl.videoWidth, h = videoEl.videoHeight;
+  if (videoEl.readyState < 2 || w === 0) {
+    q2Timer = setTimeout(q2Tick, 300); return;
+  }
+  q2Canvas.width  = w;
+  q2Canvas.height = h;
+  q2Canvas.getContext('2d').drawImage(videoEl, 0, 0, w, h);
+  const src = q2Canvas.toDataURL('image/jpeg', 0.82);
+
+  let done = false;
+  const guard = setTimeout(() => {
+    if (!done) { done = true; if (quaggaRunning && running) q2Timer = setTimeout(q2Tick, 300); }
+  }, 1500);
+
+  Quagga.decodeSingle({
+    decoder:  { readers: ['code_128_reader'], multiple: false },
+    locate:   true,
+    locator:  { patchSize: 'medium', halfSample: true },
+    numOfWorkers: 0,   // decodeSingle はシングルスレッド
+    src
+  }, result => {
+    if (done) return;
+    done = true;
+    clearTimeout(guard);
+    if (result?.codeResult?.code?.length >= 4) addDetected(result.codeResult.code);
+    if (quaggaRunning && running) q2Timer = setTimeout(q2Tick, 280);
   });
 }
 
-/* ========= 2D（ZXing：キャンバスループ方式） ========= */
-// decodeFromVideoElementはバージョン差や Quagga との競合で動作しないため、
-// 自前の setTimeout ループでキャンバスに描画して decode する方式を採用。
-function zxingScanFrame(){
-  if(!zxingRunning || !running) return;
-
-  if(videoEl.readyState >= 2 && videoEl.videoWidth > 0){
-    const w = videoEl.videoWidth;
-    const h = videoEl.videoHeight;
+/* ===== 2D スキャン（ZXing キャンバスループ） ===== */
+function start2D() {
+  zxingRunning = true;
+  zxTick();
+}
+function zxTick() {
+  if (!zxingRunning || !running) return;
+  const w = videoEl.videoWidth, h = videoEl.videoHeight;
+  if (videoEl.readyState >= 2 && w > 0) {
     zxingCanvas.width  = w;
     zxingCanvas.height = h;
-    zxingCanvas.getContext("2d").drawImage(videoEl, 0, 0, w, h);
-    try{
-      const result = zxingReader.decodeFromCanvas(zxingCanvas);
-      if(result) addDetected(result.getText ? result.getText() : result.text);
-    }catch(e){ /* NotFoundException = バーコードなし（正常） */ }
+    zxingCanvas.getContext('2d').drawImage(videoEl, 0, 0, w, h);
+    try {
+      const r = zxingReader.decodeFromCanvas(zxingCanvas);
+      if (r) addDetected(r.getText ? r.getText() : r.text);
+    } catch(e) { /* NotFoundException = バーコードなし（正常） */ }
   }
-
-  zxingTimerId = setTimeout(zxingScanFrame, 300);
+  zxTimer = setTimeout(zxTick, 300);
 }
 
-async function start2D(){
-  if(zxingRunning) return;
-  zxingRunning = true;
-  zxingScanFrame();
-}
-
-/* ========= スキャン開始（モード別） ========= */
-async function startScan(){
+/* ===== スキャン開始 ===== */
+async function startScan() {
   await stopAll();
   running = true;
   btnStart.disabled = true;
   btnStop.disabled  = false;
 
+  await startCamera();   // 共通：カメラを起動して video に表示
+
   const mode = modeEl.value;
-  if(mode === "2d"){
-    // 2D専用：手動カメラ管理 + ZXing
-    await startCamera();
-    await start2D();
-    setStatus("スキャン中（2D: QR / DataMatrix）");
-  }else if(mode === "1d"){
-    // 1D専用：Quaggaがカメラ管理（二重起動なし）
-    await start1D();
-    setStatus("スキャン中（1D: GS1-128 / Code128）");
-  }else{
-    // 自動：Quaggaがカメラ管理 + ZXingも同じvideo要素で動作
-    await start1D();
-    await start2D();
-    setStatus("スキャン中（自動：1D + 2D）");
+  if (mode === '1d') {
+    start1D();
+    setStatus('スキャン中（1D: GS1-128 / Code128）', 'scanning');
+  } else if (mode === '2d') {
+    start2D();
+    setStatus('スキャン中（2D: QR / DataMatrix）', 'scanning');
+  } else {
+    start1D(); start2D();
+    setStatus('スキャン中（自動：1D + 2D）', 'scanning');
   }
 }
 
-/* ========= 停止 ========= */
-async function stopAll(){
-  // Quagga停止
-  try{
-    if(quaggaRunning){
-      Quagga.stop();
-      quaggaRunning = false;
-    }
-  }catch(e){}
-
-  // ZXing停止（キャンバスループ）
-  clearTimeout(zxingTimerId);
-  zxingTimerId = null;
-  try{ zxingReader?.reset(); }catch(e){}
-  zxingRunning = false;
-
-  // カメラ停止
-  try{
-    if(stream){
-      stream.getTracks().forEach(t => t.stop());
-    }
-  }catch(e){}
-  stream = null;
-  track = null;
-  torchOn = false;
-
-  running = false;
+/* ===== 停止 ===== */
+async function stopAll() {
+  quaggaRunning = false;
+  zxingRunning  = false;
+  clearTimeout(q2Timer);
+  clearTimeout(zxTimer);
+  q2Timer = null; zxTimer = null;
+  try { zxingReader?.reset(); } catch(e) {}
+  try { stream?.getTracks().forEach(t => t.stop()); } catch(e) {}
+  stream = null; track = null; torchOn = false;
+  videoEl.srcObject = null;
+  running           = false;
   btnStart.disabled = false;
-  btnStop.disabled = true;
+  btnStop.disabled  = true;
   btnTorch.disabled = true;
-
-  setStatus("停止中");
+  scanFrame.style.display = 'none';
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  setStatus('停止中', 'idle');
 }
 
-/* ========= ライト / ズーム ========= */
-async function toggleTorch(){
-  if(!track) return;
-  const caps = track.getCapabilities?.();
-  if(!caps || !caps.torch){
-    alert("この端末/ブラウザはライト制御に非対応です");
+/* ===== 読み取り登録 ===== */
+function addDetected(raw) {
+  if (!raw) return;
+  const now = Date.now();
+  if (now - (lastSeen.get(raw) || 0) < COOLDOWN) return;
+  lastSeen.set(raw, now);
+
+  const p   = parseGS1(raw);
+  const rec = { time: new Date().toLocaleString(), gtin: p.gtin, exp: p.exp, lot: p.lot, raw };
+  rows.push(rec);
+  if (rows.length > MAX_ROWS) rows.shift();
+
+  lastRawEl.textContent  = raw;
+  lastGTINEl.textContent = p.gtin;
+  lastEXPEl.textContent  = p.exp;
+  lastLOTEl.textContent  = p.lot;
+  resultBox.classList.add('show');
+
+  if (navigator.vibrate) navigator.vibrate(30);
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o  = ac.createOscillator(), g = ac.createGain();
+    o.frequency.value = 880; g.gain.value = 0.02;
+    o.connect(g); g.connect(ac.destination);
+    o.start(); setTimeout(() => { o.stop(); ac.close(); }, 80);
+  } catch(e) {}
+
+  setStatus('読み取りOK ✓', 'scanning');
+  render();
+}
+
+/* ===== テーブル描画 ===== */
+function render() {
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="ei">📦</div>スキャン履歴はありません</div></td></tr>';
     return;
   }
-  torchOn = !torchOn;
-  await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト";
+  tbody.innerHTML = '';
+  [...rows].reverse().forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="white-space:nowrap;font-size:11px">${esc(r.time)}</td>
+      <td class="mono">${esc(r.gtin)}</td>
+      <td class="mono">${esc(r.exp)}</td>
+      <td class="mono">${esc(r.lot)}</td>
+      <td class="mono" style="font-size:10px;max-width:160px;word-break:break-all">${esc(r.raw)}</td>`;
+    tbody.appendChild(tr);
+  });
 }
 
-async function setZoom(v){
-  if(!track) return;
-  const caps = track.getCapabilities?.();
-  if(!caps || !caps.zoom) return;
-  await track.applyConstraints({ advanced: [{ zoom: Number(v) }] });
-}
-
-/* ========= CSV ========= */
-function downloadCSV(){
-  let csv = "time,gtin,exp,lot,raw\n";
-  for(const r of rows){
-    csv += [r.time,r.gtin,r.exp,r.lot,r.raw].map(csvEscape).join(",") + "\n";
-  }
-  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `gs1_scan_${new Date().toISOString().slice(0,10)}.csv`;
+/* ===== CSV ダウンロード ===== */
+function downloadCSV() {
+  let csv = 'time,gtin,exp,lot,raw\n';
+  rows.forEach(r => {
+    csv += [r.time, r.gtin, r.exp, r.lot, r.raw].map(csvEsc).join(',') + '\n';
+  });
+  const a = document.createElement('a');
+  a.href     = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `scan_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
 }
 
-/* ========= イベント ========= */
-btnStart.addEventListener("click", async ()=>{
-  debugEl.textContent = "";
-  try{
+/* ===== ライト ===== */
+async function toggleTorch() {
+  if (!track) return;
+  const caps = track.getCapabilities?.();
+  if (!caps?.torch) { alert('この端末はライト制御に非対応です'); return; }
+  torchOn = !torchOn;
+  await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+  btnTorch.textContent = torchOn ? '🔦 OFF' : '🔦 ライト';
+}
+
+/* ===== ズーム ===== */
+async function setZoom(v) {
+  if (!track) return;
+  const caps = track.getCapabilities?.();
+  if (!caps?.zoom) return;
+  await track.applyConstraints({ advanced: [{ zoom: Number(v) }] });
+}
+
+/* ===== イベント ===== */
+btnStart.addEventListener('click', async () => {
+  debugEl.textContent = '';
+  try {
     await startScan();
-  }catch(e){
+  } catch(e) {
     console.error(e);
-    alert("カメラ起動に失敗しました。iPhoneはHTTPS必須、カメラ許可を確認してください。");
-    setStatus("起動失敗");
-    debugEl.textContent = "起動失敗：HTTPS/権限/端末を確認";
+    setStatus('起動失敗', 'error');
+    debugEl.textContent = 'カメラ起動に失敗しました。HTTPS必須・カメラ許可を確認してください。';
     running = false;
     btnStart.disabled = false;
-    btnStop.disabled = true;
+    btnStop.disabled  = true;
+    scanFrame.style.display = 'none';
   }
 });
 
-btnStop.addEventListener("click", stopAll);
-btnTorch.addEventListener("click", toggleTorch);
+btnStop.addEventListener('click', stopAll);
+btnTorch.addEventListener('click', toggleTorch);
+zoomEl.addEventListener('input', e => {
+  setZoom(e.target.value);
+  zoomVal.textContent = `${Number(e.target.value).toFixed(1)}×`;
+});
 
-zoomEl.addEventListener("input", (e)=> setZoom(e.target.value));
-
-document.getElementById("btnCsv").addEventListener("click", downloadCSV);
-
-document.getElementById("btnClear").addEventListener("click", ()=>{
-  rows = [];
-  lastSeen.clear();
+document.getElementById('btnCsv').addEventListener('click', downloadCSV);
+document.getElementById('btnClear').addEventListener('click', () => {
+  rows = []; lastSeen.clear();
+  resultBox.classList.remove('show');
+  lastRawEl.textContent = lastGTINEl.textContent =
+  lastEXPEl.textContent = lastLOTEl.textContent = '';
+  setStatus('履歴クリア', 'idle');
   render();
-  lastRawEl.textContent = "";
-  lastGTINEl.textContent = "";
-  lastEXPEl.textContent = "";
-  lastLOTEl.textContent = "";
-  setStatus("履歴クリア");
 });
 
-document.getElementById("btnManual").addEventListener("click", ()=>{
+document.getElementById('btnManual').addEventListener('click', () => {
   const v = manualEl.value.trim();
-  if(!v) return;
+  if (!v) return;
   addDetected(v);
-  manualEl.value = "";
+  manualEl.value = '';
 });
-
-/* ========= 初期表示 ========= */
-setStatus("待機中（開始を押してください）");
+manualEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btnManual').click();
+});
 </script>
 </body>
 </html>
