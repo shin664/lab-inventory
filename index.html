@@ -1,157 +1,349 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GS1スキャナ</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>GS1スキャナ（背面カメラ固定 / CSV）</title>
 
-<script src="https://unpkg.com/@zxing/library@latest"></script>
+  <!-- ZXing -->
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
 
-<style>
-body{
-font-family:sans-serif;
-text-align:center;
-background:#111;
-color:white;
-}
-
-video{
-width:90%;
-max-width:500px;
-border-radius:10px;
-}
-
-button{
-padding:12px;
-margin:10px;
-font-size:16px;
-}
-</style>
+  <style>
+    :root{
+      --bg:#0b1220; --card:#111b2e; --txt:#e6edf7; --sub:#9bb0d1;
+      --btn:#2b6cff; --btn2:rgba(255,255,255,0.08); --danger:#ff4d4d;
+      --ok:#a7ffbf; --warn:#ffd28a;
+    }
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif;background:var(--bg);color:var(--txt);}
+    header{padding:14px 16px;background:linear-gradient(180deg,#0f1a33,#0b1220);position:sticky;top:0;z-index:5}
+    h1{font-size:16px;margin:0 0 6px 0}
+    .sub{font-size:12px;color:var(--sub);line-height:1.4}
+    .wrap{padding:14px 16px;max-width:980px;margin:0 auto}
+    .grid{display:grid;gap:12px}
+    @media (min-width:860px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
+    .card{background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px}
+    video{width:100%;border-radius:12px;background:#000;aspect-ratio: 3/4;object-fit:cover}
+    .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+    button{
+      border:0;border-radius:12px;padding:11px 12px;font-size:14px;
+      background:var(--btn2);color:var(--txt);cursor:pointer
+    }
+    button.primary{background:var(--btn)}
+    button.danger{background:rgba(255,77,77,0.18);color:#ffd2d2}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:11px;color:var(--sub)}
+    .hint{font-size:12px;color:var(--sub);line-height:1.5;margin:10px 0 0}
+    .ok{color:var(--ok)} .warn{color:var(--warn)}
+    table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+    th,td{border-bottom:1px solid rgba(255,255,255,0.10);padding:8px 6px;vertical-align:top}
+    th{color:var(--sub);text-align:left;font-weight:600}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    input{
+      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
+    }
+    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
+  </style>
 </head>
 
 <body>
+<header>
+  <h1>検査室 GS1スキャナ（背面カメラ固定 / CSV）</h1>
+  <div class="sub">GS1-128（Code128）を読み取り → (01)(17)(10) を自動分解 → CSVダウンロード</div>
+</header>
 
-<h2>検査室 GS1スキャナ</h2>
+<div class="wrap">
+  <div class="grid">
+    <!-- left -->
+    <div class="card">
+      <video id="video" playsinline></video>
 
-<video id="video"></video>
+      <div class="row">
+        <button class="primary" id="btnStart">開始（背面カメラ）</button>
+        <button id="btnStop" disabled>停止</button>
+        <button id="btnTorch" disabled>ライト</button>
+        <span class="pill" id="status">待機中</span>
+      </div>
 
-<br>
+      <label>手入力 / 貼り付け（Cognexの ]C1… もOK）</label>
+      <input id="manual" class="mono" placeholder="例：]C101049123456789031724033110ABC123" />
+      <div class="row">
+        <button id="btnManual">解析して追加</button>
+      </div>
 
-<button onclick="start()">カメラ開始</button>
-<button onclick="downloadCSV()">CSVダウンロード</button>
+      <p class="hint">
+        <span class="ok">✅ コツ：</span>ラベル全体が入る距離でピントが合ってから近づける。<br>
+        <span class="warn">⚠ よくある原因：</span>反射/暗い/ブレ/小さい → ライトON、机に固定、明るい場所。
+      </p>
+    </div>
 
-<table id="table">
-<tr>
-<th>time</th>
-<th>GTIN</th>
-<th>EXP</th>
-<th>LOT</th>
-</tr>
-</table>
+    <!-- right -->
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="btnCsv">CSVダウンロード</button>
+        <button class="danger" id="btnClear">履歴クリア</button>
+      </div>
+
+      <label>履歴（最新が下）</label>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:140px">時刻</th>
+            <th style="width:160px">GTIN(01)</th>
+            <th style="width:110px">期限(17)</th>
+            <th style="width:140px">LOT(10)</th>
+            <th>生データ</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+
+      <p class="hint">
+        CSV列：time,gtin,exp,lot,raw<br>
+        exp は YYMMDD → 20YY-MM-DD（年は2000年代扱い）
+      </p>
+    </div>
+  </div>
+</div>
 
 <script>
+/* ========= 運用パラメータ ========= */
+const SCAN_COOLDOWN_MS = 1200;  // 同じコードの連続登録を防ぐ
+const MAX_ROWS = 500;          // 履歴上限
 
-let data=[];
+/* ========= GS1パーサ（01/17/10） ========= */
+const GS = String.fromCharCode(29);
 
-function parseGS1(raw){
+function normalizeRaw(raw){
+  if(!raw) return "";
+  raw = raw.trim();
 
-raw=raw.replace("]C1","");
+  // Symbology Identifier の除去（Cognex等）
+  // 例：]C101.... / ]E0.... など
+  if(raw.startsWith("]C1") || raw.startsWith("]c1")) raw = raw.slice(3);
+  if(raw.startsWith("]E0") || raw.startsWith("]e0")) raw = raw.slice(3);
 
-let gtin="";
-let exp="";
-let lot="";
-
-let i=0;
-
-while(i<raw.length){
-
-let ai=raw.substr(i,2);
-
-if(ai=="01"){
-gtin=raw.substr(i+2,14);
-i+=16;
-continue;
+  // (01)049... のような括弧表記も想定して簡易除去
+  raw = raw.replace(/\(/g,"").replace(/\)/g,"");
+  return raw;
 }
 
-if(ai=="17"){
-exp=raw.substr(i+2,6);
-i+=8;
-continue;
+function formatYYMMDD(yymmdd){
+  if(!/^\d{6}$/.test(yymmdd)) return "";
+  const yy = parseInt(yymmdd.slice(0,2),10);
+  const mm = yymmdd.slice(2,4);
+  const dd = yymmdd.slice(4,6);
+  const yyyy = 2000 + yy; // 必要なら 19xx/20xx の判定も追加可能
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-if(ai=="10"){
-lot=raw.substr(i+2);
-break;
+function parseGS1(rawInput){
+  const s = normalizeRaw(rawInput);
+  const out = { gtin:"", exp:"", lot:"" };
+  let i = 0;
+
+  while(i < s.length){
+    if(s[i] === GS){ i++; continue; }
+
+    const ai2 = s.slice(i, i+2);
+
+    if(ai2 === "01"){
+      const v = s.slice(i+2, i+16);
+      if(/^\d{14}$/.test(v)) out.gtin = v;
+      i += 16; continue;
+    }
+    if(ai2 === "17"){
+      const v = s.slice(i+2, i+8);
+      if(/^\d{6}$/.test(v)) out.exp = formatYYMMDD(v);
+      i += 8; continue;
+    }
+    if(ai2 === "10"){
+      const start = i+2;
+      const gsPos = s.indexOf(GS, start);
+      const end = (gsPos !== -1) ? gsPos : Math.min(start + 20, s.length);
+      out.lot = s.slice(start, end);
+      i = end; continue;
+    }
+    i++;
+  }
+  return out;
 }
 
-i++;
+/* ========= 履歴 / CSV ========= */
+let rows = [];
+let lastSeen = new Map();
 
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function csvEscape(v){
+  const s = String(v ?? "");
+  if(/[",\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
+  return s;
 }
 
-return {gtin,exp,lot};
+function addRow(raw){
+  const now = new Date();
+  const time = now.toLocaleString();
 
+  const parsed = parseGS1(raw);
+  rows.push({ time, gtin:parsed.gtin, exp:parsed.exp, lot:parsed.lot, raw });
+
+  if(rows.length > MAX_ROWS) rows.shift();
+  render();
 }
 
-const codeReader = new ZXing.BrowserMultiFormatReader();
-
-function start(){
-
-navigator.mediaDevices.getUserMedia({
-video:{facingMode:"environment"}
-}).then(stream=>{
-
-video.srcObject=stream;
-
-codeReader.decodeFromVideoElement(video,(result,err)=>{
-
-if(result){
-
-let raw=result.text;
-
-let parsed=parseGS1(raw);
-
-let now=new Date().toLocaleString();
-
-data.push([now,parsed.gtin,parsed.exp,parsed.lot]);
-
-let table=document.getElementById("table");
-
-let row=table.insertRow();
-
-row.insertCell(0).innerText=now;
-row.insertCell(1).innerText=parsed.gtin;
-row.insertCell(2).innerText=parsed.exp;
-row.insertCell(3).innerText=parsed.lot;
-
-}
-
-});
-
-});
-
+function render(){
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = "";
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(r.time)}</td>
+      <td class="mono">${escapeHtml(r.gtin)}</td>
+      <td class="mono">${escapeHtml(r.exp)}</td>
+      <td class="mono">${escapeHtml(r.lot)}</td>
+      <td class="mono">${escapeHtml(r.raw)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
 }
 
 function downloadCSV(){
-
-let csv="time,gtin,exp,lot\n";
-
-data.forEach(r=>{
-csv+=r.join(",")+"\n";
-});
-
-let blob=new Blob([csv]);
-
-let a=document.createElement("a");
-
-a.href=URL.createObjectURL(blob);
-
-a.download="scan.csv";
-
-a.click();
-
+  let csv = "time,gtin,exp,lot,raw\n";
+  for(const r of rows){
+    csv += [r.time,r.gtin,r.exp,r.lot,r.raw].map(csvEscape).join(",") + "\n";
+  }
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `gs1_scan_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
 }
 
-</script>
+/* ========= ZXing（背面固定） ========= */
+let codeReader = null;
+let currentTrack = null;
+let torchOn = false;
+let decoding = false;
 
+const statusEl = document.getElementById("status");
+const btnStart = document.getElementById("btnStart");
+const btnStop  = document.getElementById("btnStop");
+const btnTorch = document.getElementById("btnTorch");
+const videoEl  = document.getElementById("video");
+const manualEl = document.getElementById("manual");
+
+function setStatus(t){ statusEl.textContent = t; }
+
+async function startCameraBack(){
+  if(!window.ZXing){ alert("ZXingライブラリ読み込み失敗"); return; }
+
+  // 先に背面カメラで stream を確保（facingMode: environment）
+  setStatus("カメラ起動中…");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" } },
+    audio: false
+  });
+  videoEl.srcObject = stream;
+
+  currentTrack = stream.getVideoTracks()[0] || null;
+  btnTorch.disabled = !(currentTrack && currentTrack.getCapabilities && currentTrack.getCapabilities().torch);
+
+  // ZXingで読み取り開始（video elementから）
+  if(codeReader) { try{ codeReader.reset(); }catch(e){} }
+  codeReader = new ZXing.BrowserMultiFormatReader();
+
+  decoding = true;
+
+  codeReader.decodeFromVideoElement(videoEl, (result, err) => {
+    if(!decoding) return;
+    if(result){
+      const raw = result.getText ? result.getText() : result.text;
+      if(!raw) return;
+
+      const now = Date.now();
+      const last = lastSeen.get(raw) || 0;
+      if(now - last < SCAN_COOLDOWN_MS) return;
+      lastSeen.set(raw, now);
+
+      // バイブ（対応端末のみ）
+      if(navigator.vibrate) navigator.vibrate(30);
+
+      // 音（無音でもOKな簡易ビープ）
+      try{
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator(); const g = ctx.createGain();
+        o.frequency.value = 880; g.gain.value = 0.02;
+        o.connect(g); g.connect(ctx.destination);
+        o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, 80);
+      }catch(e){}
+
+      addRow(raw);
+      setStatus("読み取りOK");
+    }
+  });
+
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+  setStatus("スキャン中（背面）");
+}
+
+async function stopCamera(){
+  decoding = false;
+  try{
+    if(codeReader){ codeReader.reset(); codeReader = null; }
+  }catch(e){}
+  try{
+    const stream = videoEl.srcObject;
+    if(stream){ stream.getTracks().forEach(t => t.stop()); }
+    videoEl.srcObject = null;
+  }catch(e){}
+  currentTrack = null;
+  torchOn = false;
+  btnTorch.textContent = "ライト";
+  btnTorch.disabled = true;
+
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  setStatus("停止中");
+}
+
+async function toggleTorch(){
+  if(!currentTrack) return;
+  const caps = currentTrack.getCapabilities?.();
+  if(!caps || !caps.torch){
+    alert("この端末/ブラウザはライト制御に非対応です");
+    return;
+  }
+  torchOn = !torchOn;
+  await currentTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト";
+}
+
+/* ========= UIイベント ========= */
+btnStart.addEventListener("click", async ()=>{
+  try{
+    await startCameraBack();
+  }catch(e){
+    alert("カメラ許可が必要です。iPhoneはHTTPSで開いてください。");
+    setStatus("起動失敗");
+  }
+});
+btnStop.addEventListener("click", stopCamera);
+btnTorch.addEventListener("click", toggleTorch);
+
+document.getElementById("btnCsv").addEventListener("click", downloadCSV);
+document.getElementById("btnClear").addEventListener("click", ()=>{
+  rows = []; lastSeen.clear(); render(); setStatus("履歴クリア");
+});
+document.getElementById("btnManual").addEventListener("click", ()=>{
+  const v = manualEl.value.trim();
+  if(!v) return;
+  addRow(v);
+  manualEl.value = "";
+  setStatus("手入力を追加");
+});
+</script>
 </body>
 </html>
