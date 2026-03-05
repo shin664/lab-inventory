@@ -837,9 +837,12 @@
 
         <!-- Inventory -->
         <div id="inventory" class="tab-content">
-            <div class="search-box">
-                <span class="search-icon">🔍</span>
-                <input type="text" class="form-input search-input" id="inventorySearch" placeholder="品目名、メーカー、コードで検索...">
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <div class="search-box" style="flex: 1; margin-bottom: 0;">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" class="form-input search-input" id="inventorySearch" placeholder="品目名、メーカー、コードで検索...">
+                </div>
+                <button class="btn btn-primary" onclick="app.openNewItemModal()" style="white-space: nowrap; flex-shrink: 0;">＋ 新規登録</button>
             </div>
 
             <div class="filters" id="inventoryFilters">
@@ -1033,6 +1036,65 @@
             <button class="btn btn-primary btn-block" onclick="app.importData()">
                 📥 インポート
             </button>
+        </div>
+    </div>
+
+    <!-- New Item Modal -->
+    <div id="newItemModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="newItemModalTitle">新規物品登録</h2>
+                <button class="close-btn" onclick="app.closeNewItemModal()">✕</button>
+            </div>
+
+            <div id="newItemAlert"></div>
+
+            <div class="form-group">
+                <label class="form-label">コード <span style="color:var(--red)">*</span></label>
+                <input type="text" class="form-input" id="newItemCode" placeholder="例: 76901A">
+                <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">社内管理コード（英数字）</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">物品コード（バーコード）</label>
+                <input type="text" class="form-input" id="newItemProductCode" placeholder="例: 04987026021942">
+                <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">JANコード・GTINなど（スキャン照合に使用）</div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">物品名 <span style="color:var(--red)">*</span></label>
+                <input type="text" class="form-input" id="newItemName" placeholder="例: スキロー改良培地">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">メーカー</label>
+                <input type="text" class="form-input" id="newItemMaker" placeholder="例: 栄研化学">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">規格</label>
+                <input type="text" class="form-input" id="newItemSpec" placeholder="例: 10枚、500ml">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">在庫数</label>
+                <input type="number" class="form-input" id="newItemStock" placeholder="0" min="0" value="0">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">使用期限 <span style="font-size:11px; color:var(--text2); font-weight: normal;">（YYMMDD形式）</span></label>
+                <input type="text" class="form-input" id="newItemExpiry" placeholder="例: 260228（2026年2月28日）" maxlength="6">
+                <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">月のみの場合は末尾に00を付加（例: 26020 → 260200）</div>
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-primary" style="flex: 1;" onclick="app.saveNewItem()">
+                    💾 登録する
+                </button>
+                <button class="btn btn-secondary" style="flex: 1;" onclick="app.closeNewItemModal()">
+                    キャンセル
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1311,23 +1373,33 @@
                         const statusLabel = this.getExpiryStatusLabel(expiryStatus);
                         const stockClass = item['在庫数'] === 0 ? 'stock-low' : item['在庫数'] < 5 ? 'stock-warning' : '';
 
+                        const idx = this.items.indexOf(item);
                         return `
                             <div class="item-card ${stockClass}">
                                 <div class="item-info">
                                     <div class="item-name">${item['物品名']}</div>
                                     <div class="item-detail">
-                                        <small><strong>メーカー:</strong> ${item['メーカー']}</small>
-                                        <small><strong>規格:</strong> ${item['規格']}</small>
-                                        <small><strong>コード:</strong> ${item['コード']} / ${item['物品コード']}</small>
+                                        <small><strong>メーカー:</strong> ${item['メーカー'] || '―'}</small>
+                                        &nbsp;<small><strong>規格:</strong> ${item['規格'] || '―'}</small>
+                                    </div>
+                                    <div class="item-detail">
+                                        <small><strong>コード:</strong> ${item['コード']}</small>
+                                        ${item['物品コード'] ? `<small style="margin-left:6px"><strong>物品:</strong> ${item['物品コード']}</small>` : ''}
                                     </div>
                                     <span class="expiry-status ${statusLabel.class}">${statusLabel.text}</span>
                                     <div class="item-detail" style="margin-top: 4px;">
                                         期限: ${this.formatDate(item['入庫後最新使用期限(日付)'])}
                                     </div>
                                 </div>
-                                <div class="item-stock">
-                                    <div class="stock-number">${item['在庫数']}</div>
-                                    <div style="font-size: 12px; color: var(--text2);">個</div>
+                                <div class="item-stock" style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+                                    <div>
+                                        <div class="stock-number">${item['在庫数']}</div>
+                                        <div style="font-size: 12px; color: var(--text2); text-align:right;">個</div>
+                                    </div>
+                                    <button data-edit-idx="${idx}" class="edit-item-btn"
+                                        style="font-size:11px;padding:4px 10px;border:1px solid var(--border);background:var(--surface2);border-radius:6px;cursor:pointer;color:var(--text2);white-space:nowrap;">
+                                        ✏️ 編集
+                                    </button>
                                 </div>
                             </div>
                         `;
@@ -1339,6 +1411,17 @@
                     </div>`;
 
                 document.getElementById('inventoryList').innerHTML = html;
+
+                // Attach edit button handlers via event delegation
+                document.getElementById('inventoryList').querySelectorAll('.edit-item-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const idx = parseInt(btn.dataset.editIdx);
+                        if (!isNaN(idx) && this.items[idx]) {
+                            this.openNewItemModal(this.items[idx]);
+                        }
+                    });
+                });
             }
 
             filterExpiry() {
@@ -1791,6 +1874,102 @@
                 const v = document.getElementById('barcodeInput').value.trim();
                 if (!v) return;
                 this.processBarcodeInput(v);
+            }
+
+            openNewItemModal(editItem = null) {
+                this._editingItem = editItem;
+                const title = document.getElementById('newItemModalTitle');
+                title.textContent = editItem ? '物品情報を編集' : '新規物品登録';
+                document.getElementById('newItemAlert').innerHTML = '';
+
+                if (editItem) {
+                    document.getElementById('newItemCode').value = editItem['コード'] || '';
+                    document.getElementById('newItemCode').readOnly = true;
+                    document.getElementById('newItemCode').style.background = 'var(--surface2)';
+                    document.getElementById('newItemProductCode').value = editItem['物品コード'] || '';
+                    document.getElementById('newItemName').value = editItem['物品名'] || '';
+                    document.getElementById('newItemMaker').value = editItem['メーカー'] || '';
+                    document.getElementById('newItemSpec').value = editItem['規格'] || '';
+                    document.getElementById('newItemStock').value = editItem['在庫数'] ?? 0;
+                    document.getElementById('newItemExpiry').value = editItem['入庫後最新使用期限(日付)'] || '';
+                } else {
+                    document.getElementById('newItemCode').value = '';
+                    document.getElementById('newItemCode').readOnly = false;
+                    document.getElementById('newItemCode').style.background = '';
+                    document.getElementById('newItemProductCode').value = '';
+                    document.getElementById('newItemName').value = '';
+                    document.getElementById('newItemMaker').value = '';
+                    document.getElementById('newItemSpec').value = '';
+                    document.getElementById('newItemStock').value = 0;
+                    document.getElementById('newItemExpiry').value = '';
+                }
+
+                document.getElementById('newItemModal').classList.add('active');
+                setTimeout(() => document.getElementById('newItemCode').focus(), 300);
+            }
+
+            closeNewItemModal() {
+                document.getElementById('newItemModal').classList.remove('active');
+                this._editingItem = null;
+            }
+
+            async saveNewItem() {
+                const code = document.getElementById('newItemCode').value.trim().toUpperCase();
+                const productCode = document.getElementById('newItemProductCode').value.trim();
+                const name = document.getElementById('newItemName').value.trim();
+                const maker = document.getElementById('newItemMaker').value.trim();
+                const spec = document.getElementById('newItemSpec').value.trim();
+                const stock = parseInt(document.getElementById('newItemStock').value) || 0;
+                const expiryRaw = document.getElementById('newItemExpiry').value.trim();
+
+                // Validation
+                if (!code) {
+                    this.showAlert('newItemAlert', 'コードを入力してください', 'error');
+                    return;
+                }
+                if (!name) {
+                    this.showAlert('newItemAlert', '物品名を入力してください', 'error');
+                    return;
+                }
+                if (expiryRaw && !/^\d{6}$/.test(expiryRaw)) {
+                    this.showAlert('newItemAlert', '使用期限はYYMMDD形式（6桁の数字）で入力してください', 'error');
+                    return;
+                }
+
+                // Check duplicate code (新規のみ)
+                if (!this._editingItem) {
+                    const dup = this.items.find(i => String(i['コード']).toUpperCase() === code);
+                    if (dup) {
+                        this.showAlert('newItemAlert', `コード「${code}」はすでに登録されています`, 'error');
+                        return;
+                    }
+                }
+
+                const expiryNum = expiryRaw ? parseInt(expiryRaw) : null;
+                const item = {
+                    id: code,
+                    'コード': code,
+                    '物品コード': productCode,
+                    'メーカー': maker,
+                    '物品名': name,
+                    '規格': spec,
+                    '在庫数': stock,
+                    '入庫後最新使用期限': expiryRaw ? this.formatDate(expiryRaw) : '',
+                    '入庫後最新使用期限(日付)': expiryNum
+                };
+
+                try {
+                    await this.saveItem(item);
+                    await this.loadData();
+                    this.updateDashboard();
+                    this.filterInventory();
+
+                    const msg = this._editingItem ? `「${name}」を更新しました` : `「${name}」を登録しました`;
+                    this.showAlert('newItemAlert', `✅ ${msg}`, 'success');
+                    setTimeout(() => this.closeNewItemModal(), 1200);
+                } catch (e) {
+                    this.showAlert('newItemAlert', `❌ 保存に失敗しました: ${e.message}`, 'error');
+                }
             }
 
             filterHistory() {
