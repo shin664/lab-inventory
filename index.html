@@ -8,9 +8,9 @@
   <title>在庫スキャナ</title>
 
   <!-- 1D (GS1-128 / Code128) -->
-  <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
-  <!-- 2D (QR / GS1 DataMatrix) -->
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script src="https://unpkg.com/@ericblade/quagga2@1.7.3/dist/quagga.js"></script>
+  <!-- 2D (QR / GS1 DataMatrix) バージョン固定で API 安定性を確保 -->
+  <script src="https://unpkg.com/@zxing/library@0.19.3/umd/index.min.js"></script>
 
   <style>
     /* ── Design tokens ── */
@@ -456,17 +456,23 @@ let rows = [], lastSeen = new Map();
 let stream = null, track = null, torchOn = false;
 let running = false, quaggaRunning = false, zxingRunning = false;
 
-/* ===== ZXing セットアップ ===== */
-const zxingHints = new Map();
-zxingHints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-zxingHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-  ZXing.BarcodeFormat.CODE_128,
-  ZXing.BarcodeFormat.QR_CODE,
-  ZXing.BarcodeFormat.DATA_MATRIX,
-  ZXing.BarcodeFormat.AZTEC,
-  ZXing.BarcodeFormat.PDF_417
-]);
-let zxingReader  = new ZXing.BrowserMultiFormatReader(zxingHints);
+/* ===== ZXing セットアップ（MultiFormatReader = 低レベル同期 API） ===== */
+// BrowserMultiFormatReader.decodeFromCanvas() はバージョンにより非同期化/削除されるため
+// バージョン間で安定した MultiFormatReader + HTMLCanvasElementLuminanceSource を使用
+const zxingReader = (() => {
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.QR_CODE,
+    ZXing.BarcodeFormat.DATA_MATRIX,
+    ZXing.BarcodeFormat.AZTEC,
+    ZXing.BarcodeFormat.PDF_417
+  ]);
+  const r = new ZXing.MultiFormatReader();
+  r.setHints(hints);
+  return r;
+})();
 const zxingCanvas = document.createElement('canvas');
 let zxTimer = null;
 
@@ -601,11 +607,16 @@ function zxTick() {
   if (videoEl.readyState >= 2 && w > 0) {
     zxingCanvas.width  = w;
     zxingCanvas.height = h;
-    zxingCanvas.getContext('2d').drawImage(videoEl, 0, 0, w, h);
+    const imgCtx = zxingCanvas.getContext('2d');
+    imgCtx.drawImage(videoEl, 0, 0, w, h);
     try {
-      const r = zxingReader.decodeFromCanvas(zxingCanvas);
-      if (r) addDetected(r.getText ? r.getText() : r.text);
-    } catch(e) { /* NotFoundException = バーコードなし（正常） */ }
+      const lum    = new ZXing.HTMLCanvasElementLuminanceSource(zxingCanvas);
+      const bmp    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+      const result = zxingReader.decode(bmp);
+      if (result) addDetected(result.getText());
+    } catch(e) {
+      /* NotFoundException = バーコードなし（正常）。他のエラーは無視 */
+    }
   }
   zxTimer = setTimeout(zxTick, 300);
 }
@@ -639,7 +650,6 @@ async function stopAll() {
   clearTimeout(q2Timer);
   clearTimeout(zxTimer);
   q2Timer = null; zxTimer = null;
-  try { zxingReader?.reset(); } catch(e) {}
   try { stream?.getTracks().forEach(t => t.stop()); } catch(e) {}
   stream = null; track = null; torchOn = false;
   videoEl.srcObject = null;
