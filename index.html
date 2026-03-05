@@ -445,20 +445,99 @@
             box-shadow: var(--shadow);
         }
 
-        #video {
-            width: 100%;
-            height: auto;
-            display: block;
+        #scannerViewport {
+            position: relative;
+            background: #0a0a0a;
+            overflow: hidden;
+            aspect-ratio: 3/4;
+            max-height: 50vh;
         }
 
+        #scannerViewport video {
+            width: 100%; height: 100%;
+            display: block;
+            object-fit: cover;
+            background: #000;
+        }
+
+        #scannerViewport canvas {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+        }
+
+        .scan-frame {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%; height: 30%;
+            pointer-events: none;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.38);
+            border-radius: 4px;
+        }
+
+        .scan-frame::before, .scan-frame::after,
+        .scan-frame-b::before, .scan-frame-b::after {
+            content: ''; position: absolute;
+            width: 24px; height: 24px;
+            border-color: #34d399; border-style: solid;
+        }
+
+        .scan-frame::before  { top:-2px; left:-2px; border-width: 3px 0 0 3px; border-radius: 5px 0 0 0; }
+        .scan-frame::after   { top:-2px; right:-2px; border-width: 3px 3px 0 0; border-radius: 0 5px 0 0; }
+        .scan-frame-b::before { bottom:-2px; left:-2px; border-width: 0 0 3px 3px; border-radius: 0 0 0 5px; }
+        .scan-frame-b::after  { bottom:-2px; right:-2px; border-width: 0 3px 3px 0; border-radius: 0 0 5px 0; }
+
+        .scan-line-anim {
+            position: absolute;
+            left: 4px; right: 4px; height: 2px;
+            background: linear-gradient(90deg, transparent, #34d399 30%, #34d399 70%, transparent);
+            animation: scanLineMove 2s linear infinite;
+        }
+
+        @keyframes scanLineMove {
+            0%   { top: 8%;  opacity: 0; }
+            8%   {           opacity: 1; }
+            92%  {           opacity: 1; }
+            100% { top: 92%; opacity: 0; }
+        }
+
+        .cam-status-bar {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            padding: 10px 14px;
+            background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+            display: flex; align-items: center; gap: 8px;
+        }
+
+        .cam-dot {
+            width: 9px; height: 9px; border-radius: 50%;
+            background: #666; flex-shrink: 0;
+            transition: background .3s, box-shadow .3s;
+        }
+
+        .cam-dot.active {
+            background: #4ade80;
+            box-shadow: 0 0 7px #4ade80;
+            animation: camBlink 1.5s infinite;
+        }
+
+        .cam-dot.error { background: #f87171; }
+
+        @keyframes camBlink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        .cam-status-text { color: #fff; font-size: 13px; font-weight: 500; }
+
         .scanner-controls {
-            padding: 16px;
+            padding: 12px 16px;
             display: flex;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .scanner-controls button {
             flex: 1;
+            min-width: 0;
         }
 
         .modal {
@@ -785,17 +864,38 @@
 
         <!-- Scanner -->
         <div id="scanner" class="tab-content">
-            <div class="card">
-                <h2 class="card-title">バーコードスキャナー</h2>
-                <div class="scanner-container" id="scannerContainer" style="display: none;">
-                    <video id="video" playsinline></video>
-                </div>
-                <div class="scanner-controls">
-                    <button class="btn btn-primary" onclick="app.startScanner()">📷 スキャン開始</button>
-                    <button class="btn btn-secondary" onclick="app.stopScanner()">⏹️ 停止</button>
+            <div class="card" style="padding: 0; overflow: hidden;">
+                <div style="padding: 12px 16px; border-bottom: 1px solid var(--border);">
+                    <h2 class="card-title" style="margin-bottom: 0;">バーコードスキャナー</h2>
                 </div>
 
-                <input type="text" class="form-input scanner-input" id="barcodeInput" placeholder="バーコードを入力またはスキャン...">
+                <div id="scannerViewport" style="display: none;">
+                    <video id="scanVideo" playsinline autoplay muted></video>
+                    <canvas id="scanOverlay"></canvas>
+                    <div class="scan-frame" id="scanFrame" style="display: none;">
+                        <div class="scan-frame-b"></div>
+                        <div class="scan-line-anim"></div>
+                    </div>
+                    <div class="cam-status-bar">
+                        <div class="cam-dot" id="camDot"></div>
+                        <span class="cam-status-text" id="camStatus">待機中</span>
+                    </div>
+                </div>
+
+                <div class="scanner-controls">
+                    <button class="btn btn-primary" id="btnScanStart" onclick="app.startScanner()">📷 スキャン開始</button>
+                    <button class="btn btn-secondary" id="btnScanStop" onclick="app.stopScanner()" disabled>⏹ 停止</button>
+                    <button class="btn btn-secondary" id="btnTorch" onclick="app.toggleTorch()" style="display: none;">🔦 ライト</button>
+                </div>
+
+                <div style="padding: 0 16px 16px;">
+                    <label style="font-size: 12px; font-weight: 600; color: var(--text2); display: block; margin-bottom: 6px;">手入力 / 貼り付け</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" class="form-input scanner-input" id="barcodeInput" placeholder="バーコードまたは物品コードを入力..." style="flex: 1; margin-bottom: 0;">
+                        <button class="btn btn-primary" onclick="app.manualLookup()" style="white-space: nowrap;">検索</button>
+                    </div>
+                    <div id="scanDebug" style="font-size: 11px; color: var(--red); margin-top: 6px; min-height: 0;"></div>
+                </div>
             </div>
 
             <div id="scannerResult"></div>
@@ -927,7 +1027,7 @@
 
             <div class="form-group">
                 <label class="form-label">ファイルを選択</label>
-                <input type="file" id="importFile" class="form-input" accept=".xlsx,.xls">
+                <input type="file" id="importFile" class="form-input" accept=".xlsx,.xls,.xlsm">
             </div>
 
             <button class="btn btn-primary btn-block" onclick="app.importData()">
@@ -1008,8 +1108,7 @@
 
                 document.getElementById('barcodeInput').addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') {
-                        this.processBarcodeInput(e.target.value);
-                        e.target.value = '';
+                        this.manualLookup();
                     }
                 });
 
@@ -1300,10 +1399,19 @@
             }
 
             processBarcodeInput(barcode) {
-                const matched = this.items.find(item =>
-                    String(item['コード']) === String(barcode) ||
-                    String(item['物品コード']) === String(barcode)
-                );
+                if (!barcode) return;
+                const bc = String(barcode).trim();
+                // Match against コード, 物品コード (with/without leading zeros)
+                const matched = this.items.find(item => {
+                    const code = String(item['コード'] || '');
+                    const productCode = String(item['物品コード'] || '');
+                    return code === bc || productCode === bc ||
+                        code.replace(/^0+/, '') === bc.replace(/^0+/, '') ||
+                        productCode.replace(/^0+/, '') === bc.replace(/^0+/, '') ||
+                        // GTIN-14 match: strip leading 0s from GTIN and compare
+                        bc.includes(productCode.replace(/^0+/, '')) ||
+                        productCode.includes(bc.replace(/^0+/, ''));
+                });
 
                 if (matched) {
                     this.currentScanItem = matched;
@@ -1443,52 +1551,246 @@
                 this.setTransactionType('入庫');
             }
 
-            startScanner() {
-                const container = document.getElementById('scannerContainer');
-                const video = document.getElementById('video');
-
+            /* ===== Camera-based Scanner (getUserMedia direct) ===== */
+            async startScanner() {
                 if (this.scannerActive) return;
+                const viewport = document.getElementById('scannerViewport');
+                const video = document.getElementById('scanVideo');
+                const camDot = document.getElementById('camDot');
+                const camStatus = document.getElementById('camStatus');
+                const scanFrame = document.getElementById('scanFrame');
+                const debugEl = document.getElementById('scanDebug');
+                debugEl.textContent = '';
 
-                container.style.display = 'block';
-                this.scannerActive = true;
+                camStatus.textContent = 'カメラ起動中…';
+                viewport.style.display = 'block';
 
-                Quagga.init(
-                    {
-                        inputStream: {
-                            name: 'Live',
-                            type: 'LiveStream',
-                            target: video,
-                            constraints: { facingMode: 'environment' }
-                        },
-                        decoder: {
-                            readers: [
-                                'code_128_reader', 'ean_reader', 'ean_8_reader',
-                                'qr_reader', 'code_39_reader', 'code_39_vin_reader',
-                                'codabar_reader', 'upc_reader', 'upc_e_reader', 'i2of5_reader'
-                            ],
-                            debug: { showCanvas: false, showPatternLabel: false, showLogs: false }
+                try {
+                    this._stream = await navigator.mediaDevices.getUserMedia({
+                        audio: false,
+                        video: {
+                            facingMode: { ideal: 'environment' },
+                            width: { ideal: 1920 },
+                            height: { ideal: 1080 },
+                            frameRate: { ideal: 30, max: 30 }
                         }
-                    },
-                    (err) => {
-                        if (err) return;
-                        Quagga.start();
-                        Quagga.onDetected((result) => {
-                            const code = result.codeResult.code;
-                            this.processBarcodeInput(code);
-                            this.stopScanner();
-                        });
+                    });
+
+                    video.srcObject = this._stream;
+                    await video.play().catch(() => {});
+
+                    await new Promise(resolve => {
+                        if (video.videoWidth > 0) { resolve(); return; }
+                        const onReady = () => { video.removeEventListener('loadeddata', onReady); resolve(); };
+                        video.addEventListener('loadeddata', onReady);
+                        setTimeout(resolve, 2500);
+                    });
+
+                    this._track = this._stream.getVideoTracks()[0] || null;
+                    this.scannerActive = true;
+                    this._torchOn = false;
+
+                    scanFrame.style.display = 'block';
+                    camDot.className = 'cam-dot active';
+                    camStatus.textContent = 'スキャン中（1D + 2D）';
+
+                    document.getElementById('btnScanStart').disabled = true;
+                    document.getElementById('btnScanStop').disabled = false;
+
+                    // Show torch button if supported
+                    const caps = this._track?.getCapabilities?.() || {};
+                    if (caps.torch) {
+                        document.getElementById('btnTorch').style.display = '';
                     }
-                );
+
+                    // Create scanning canvases
+                    this._scanCanvas = document.createElement('canvas');
+                    this._zxCanvas = document.createElement('canvas');
+
+                    // Setup ZXing reader
+                    if (typeof ZXing !== 'undefined') {
+                        const hints = new Map();
+                        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+                        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                            ZXing.BarcodeFormat.CODE_128,
+                            ZXing.BarcodeFormat.QR_CODE,
+                            ZXing.BarcodeFormat.DATA_MATRIX,
+                            ZXing.BarcodeFormat.EAN_13,
+                            ZXing.BarcodeFormat.EAN_8,
+                            ZXing.BarcodeFormat.PDF_417
+                        ]);
+                        this._zxReader = new ZXing.MultiFormatReader();
+                        this._zxReader.setHints(hints);
+                    }
+
+                    // Start scan loops
+                    this._quaggaRunning = true;
+                    this._zxingRunning = true;
+                    this._lastSeen = new Map();
+                    this._q2Tick();
+                    this._zxTick();
+
+                } catch (e) {
+                    console.error('Camera error:', e);
+                    camDot.className = 'cam-dot error';
+                    camStatus.textContent = '起動失敗';
+                    debugEl.textContent = 'カメラ起動に失敗しました。HTTPS必須・カメラ許可を確認してください。';
+                    viewport.style.display = 'block';
+                }
+            }
+
+            _q2Tick() {
+                if (!this._quaggaRunning || !this.scannerActive) return;
+                const video = document.getElementById('scanVideo');
+                const w = video.videoWidth, h = video.videoHeight;
+                if (video.readyState < 2 || w === 0) {
+                    this._q2Timer = setTimeout(() => this._q2Tick(), 300);
+                    return;
+                }
+                this._scanCanvas.width = w;
+                this._scanCanvas.height = h;
+                this._scanCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
+                const src = this._scanCanvas.toDataURL('image/jpeg', 0.82);
+
+                let done = false;
+                const guard = setTimeout(() => {
+                    if (!done) { done = true; if (this._quaggaRunning && this.scannerActive) this._q2Timer = setTimeout(() => this._q2Tick(), 300); }
+                }, 1500);
+
+                if (typeof Quagga !== 'undefined' && typeof Quagga.decodeSingle === 'function') {
+                    Quagga.decodeSingle({
+                        decoder: { readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'codabar_reader'], multiple: false },
+                        locate: true,
+                        locator: { patchSize: 'medium', halfSample: true },
+                        numOfWorkers: 0,
+                        src
+                    }, result => {
+                        if (done) return;
+                        done = true;
+                        clearTimeout(guard);
+                        if (result?.codeResult?.code?.length >= 4) this._onScanDetected(result.codeResult.code);
+                        if (this._quaggaRunning && this.scannerActive) this._q2Timer = setTimeout(() => this._q2Tick(), 280);
+                    });
+                } else {
+                    done = true;
+                    clearTimeout(guard);
+                    if (this._quaggaRunning && this.scannerActive) this._q2Timer = setTimeout(() => this._q2Tick(), 500);
+                }
+            }
+
+            _zxTick() {
+                if (!this._zxingRunning || !this.scannerActive || !this._zxReader) return;
+                const video = document.getElementById('scanVideo');
+                const w = video.videoWidth, h = video.videoHeight;
+                if (video.readyState >= 2 && w > 0) {
+                    this._zxCanvas.width = w;
+                    this._zxCanvas.height = h;
+                    this._zxCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
+                    try {
+                        const lum = new ZXing.HTMLCanvasElementLuminanceSource(this._zxCanvas);
+                        const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+                        const result = this._zxReader.decode(bmp);
+                        if (result) this._onScanDetected(result.getText());
+                    } catch(e) { /* NotFoundException = no barcode, normal */ }
+                }
+                this._zxTimer = setTimeout(() => this._zxTick(), 300);
+            }
+
+            _onScanDetected(raw) {
+                if (!raw) return;
+                const now = Date.now();
+                if (now - (this._lastSeen.get(raw) || 0) < 1200) return;
+                this._lastSeen.set(raw, now);
+
+                // Vibrate + beep
+                if (navigator.vibrate) navigator.vibrate(30);
+                try {
+                    const ac = new (window.AudioContext || window.webkitAudioContext)();
+                    const o = ac.createOscillator(), g = ac.createGain();
+                    o.frequency.value = 880; g.gain.value = 0.02;
+                    o.connect(g); g.connect(ac.destination);
+                    o.start(); setTimeout(() => { o.stop(); ac.close(); }, 80);
+                } catch(e) {}
+
+                // Parse GS1 if applicable
+                const parsed = this._parseGS1(raw);
+                const lookupCode = parsed.gtin || raw;
+
+                document.getElementById('camStatus').textContent = '読み取りOK ✓ ' + lookupCode;
+
+                // Try to match item
+                this.processBarcodeInput(lookupCode);
+
+                // Auto-fill expiry and lot if parsed from GS1
+                if (parsed.exp) document.getElementById('transactionExpiry').value = parsed.exp;
+                if (parsed.lot) document.getElementById('transactionLot').value = parsed.lot;
+            }
+
+            _parseGS1(rawInput) {
+                const GS = String.fromCharCode(29);
+                let s = (rawInput || '').trim();
+                if (/^\]([Cc]1|[Ee]0)/.test(s)) s = s.slice(3);
+                s = s.replace(/\(/g, '').replace(/\)/g, '');
+
+                const out = { gtin: '', exp: '', lot: '' };
+                let i = 0;
+                while (i < s.length) {
+                    if (s[i] === GS) { i++; continue; }
+                    const a2 = s.slice(i, i+2);
+                    if (a2 === '01') { const v = s.slice(i+2, i+16); if (/^\d{14}$/.test(v)) out.gtin = v; i += 16; continue; }
+                    if (a2 === '17') { const v = s.slice(i+2, i+8); if (/^\d{6}$/.test(v)) out.exp = v; i += 8; continue; }
+                    if (a2 === '10') {
+                        const st = i+2, gp = s.indexOf(GS, st);
+                        const en = gp !== -1 ? gp : Math.min(st+20, s.length);
+                        out.lot = s.slice(st, en); i = en; continue;
+                    }
+                    if (a2 === '00') { i += 20; continue; }
+                    if (a2 === '02') { i += 16; continue; }
+                    if (['11','12','13','15','16','18','19','20'].includes(a2)) { i += 8; continue; }
+                    if (a2 === '21') { const st=i+2, gp=s.indexOf(GS,st); i = gp!==-1?gp:Math.min(st+20,s.length); continue; }
+                    if (/^3[1-6]/.test(a2)) { i += 10; continue; }
+                    const ng = s.indexOf(GS, i);
+                    if (ng !== -1) { i = ng; } else break;
+                }
+                return out;
+            }
+
+            async toggleTorch() {
+                if (!this._track) return;
+                const caps = this._track.getCapabilities?.();
+                if (!caps?.torch) return;
+                this._torchOn = !this._torchOn;
+                await this._track.applyConstraints({ advanced: [{ torch: this._torchOn }] });
+                document.getElementById('btnTorch').textContent = this._torchOn ? '🔦 OFF' : '🔦 ライト';
             }
 
             stopScanner() {
-                if (!this.scannerActive) return;
-                try {
-                    Quagga.stop();
-                    Quagga.offDetected();
-                } catch (e) {}
-                document.getElementById('scannerContainer').style.display = 'none';
+                this._quaggaRunning = false;
+                this._zxingRunning = false;
+                clearTimeout(this._q2Timer);
+                clearTimeout(this._zxTimer);
+                try { this._stream?.getTracks().forEach(t => t.stop()); } catch(e) {}
+                this._stream = null;
+                this._track = null;
+                this._torchOn = false;
+
+                const video = document.getElementById('scanVideo');
+                if (video) video.srcObject = null;
+
                 this.scannerActive = false;
+                document.getElementById('scannerViewport').style.display = 'none';
+                document.getElementById('scanFrame').style.display = 'none';
+                document.getElementById('camDot').className = 'cam-dot';
+                document.getElementById('camStatus').textContent = '待機中';
+                document.getElementById('btnScanStart').disabled = false;
+                document.getElementById('btnScanStop').disabled = true;
+                document.getElementById('btnTorch').style.display = 'none';
+            }
+
+            manualLookup() {
+                const v = document.getElementById('barcodeInput').value.trim();
+                if (!v) return;
+                this.processBarcodeInput(v);
             }
 
             filterHistory() {
