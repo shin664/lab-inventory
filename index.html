@@ -3,9 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>GS1スキャナ（背面カメラ固定 / CSV）</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>在庫スキャナ（GS1-128 / DataMatrix / QR）</title>
 
-  <!-- ZXing -->
+  <!-- 1D(Code128/GS1-128)に強い -->
+  <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.js"></script>
+  <!-- 2D(QR/DataMatrix等)に強い -->
   <script src="https://unpkg.com/@zxing/library@latest"></script>
 
   <style>
@@ -18,11 +22,13 @@
     header{padding:14px 16px;background:linear-gradient(180deg,#0f1a33,#0b1220);position:sticky;top:0;z-index:5}
     h1{font-size:16px;margin:0 0 6px 0}
     .sub{font-size:12px;color:var(--sub);line-height:1.4}
-    .wrap{padding:14px 16px;max-width:980px;margin:0 auto}
+    .wrap{padding:14px 16px;max-width:1100px;margin:0 auto}
     .grid{display:grid;gap:12px}
-    @media (min-width:860px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
+    @media (min-width:920px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
     .card{background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px}
-    video{width:100%;border-radius:12px;background:#000;aspect-ratio: 3/4;object-fit:cover}
+    #viewport{position:relative;border-radius:12px;overflow:hidden;background:#000}
+    video{width:100%;display:block;aspect-ratio: 3/4;object-fit:cover;background:#000}
+    canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
     .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
     button{
       border:0;border-radius:12px;padding:11px 12px;font-size:14px;
@@ -31,6 +37,11 @@
     button.primary{background:var(--btn)}
     button.danger{background:rgba(255,77,77,0.18);color:#ffd2d2}
     button:disabled{opacity:.55;cursor:not-allowed}
+    select,input{
+      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
+    }
+    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
     .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:11px;color:var(--sub)}
     .hint{font-size:12px;color:var(--sub);line-height:1.5;margin:10px 0 0}
     .ok{color:var(--ok)} .warn{color:var(--warn)}
@@ -38,25 +49,27 @@
     th,td{border-bottom:1px solid rgba(255,255,255,0.10);padding:8px 6px;vertical-align:top}
     th{color:var(--sub);text-align:left;font-weight:600}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-    input{
-      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
-      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
-    }
-    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
+    .small{font-size:11px;color:var(--sub)}
+    .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;margin-top:8px}
+    .kv div{padding:6px 8px;border-radius:10px;background:rgba(255,255,255,0.06)}
   </style>
 </head>
 
 <body>
 <header>
-  <h1>検査室 GS1スキャナ（背面カメラ固定 / CSV）</h1>
-  <div class="sub">GS1-128（Code128）を読み取り → (01)(17)(10) を自動分解 → CSVダウンロード</div>
+  <h1>在庫スキャナ（GS1-128 / QR / GS1 DataMatrix）</h1>
+  <div class="sub">背面カメラ固定。1DはQuagga2、2DはZXingで読み取り率を最大化。CSV出力＋GS1(01)(17)(10)分解。</div>
 </header>
 
 <div class="wrap">
   <div class="grid">
-    <!-- left -->
+
+    <!-- 左：カメラ -->
     <div class="card">
-      <video id="video" playsinline></video>
+      <div id="viewport">
+        <video id="video" playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
 
       <div class="row">
         <button class="primary" id="btnStart">開始（背面カメラ）</button>
@@ -65,23 +78,43 @@
         <span class="pill" id="status">待機中</span>
       </div>
 
+      <label>スキャンモード</label>
+      <select id="mode">
+        <option value="auto" selected>自動（おすすめ：1D+2D）</option>
+        <option value="1d">1Dのみ（GS1-128/Code128専用）</option>
+        <option value="2d">2Dのみ（QR/GS1 DataMatrix専用）</option>
+      </select>
+
+      <label>ズーム（対応端末のみ）</label>
+      <input id="zoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
+      <div class="small" id="zoomInfo">ズーム：未対応</div>
+
       <label>手入力 / 貼り付け（Cognexの ]C1… もOK）</label>
       <input id="manual" class="mono" placeholder="例：]C101049123456789031724033110ABC123" />
       <div class="row">
-        <button id="btnManual">解析して追加</button>
+        <button id="btnManual">解析して履歴に追加</button>
       </div>
 
       <p class="hint">
-        <span class="ok">✅ コツ：</span>ラベル全体が入る距離でピントが合ってから近づける。<br>
-        <span class="warn">⚠ よくある原因：</span>反射/暗い/ブレ/小さい → ライトON、机に固定、明るい場所。
+        <span class="ok">✅ 現場で一番効く設定：</span>バーコードが画面幅の<strong>1/2以上</strong>に入る距離（いまの条件OK）＋ブレなし。<br/>
+        <span class="warn">⚠ 読めない時の最優先：</span>反射（ラミネート）→角度を少し変える / ライトOFFも試す / 机固定。
       </p>
+
+      <p class="small" id="debug"></p>
     </div>
 
-    <!-- right -->
+    <!-- 右：結果 -->
     <div class="card">
       <div class="row">
         <button class="primary" id="btnCsv">CSVダウンロード</button>
         <button class="danger" id="btnClear">履歴クリア</button>
+      </div>
+
+      <div class="kv">
+        <div class="small">直近RAW</div><div class="mono" id="lastRaw"></div>
+        <div class="small">GTIN(01)</div><div class="mono" id="lastGTIN"></div>
+        <div class="small">期限(17)</div><div class="mono" id="lastEXP"></div>
+        <div class="small">LOT(10)</div><div class="mono" id="lastLOT"></div>
       </div>
 
       <label>履歴（最新が下）</label>
@@ -99,17 +132,18 @@
       </table>
 
       <p class="hint">
-        CSV列：time,gtin,exp,lot,raw<br>
+        CSV列：time,gtin,exp,lot,raw<br/>
         exp は YYMMDD → 20YY-MM-DD（年は2000年代扱い）
       </p>
     </div>
+
   </div>
 </div>
 
 <script>
 /* ========= 運用パラメータ ========= */
-const SCAN_COOLDOWN_MS = 1200;  // 同じコードの連続登録を防ぐ
-const MAX_ROWS = 500;          // 履歴上限
+const SCAN_COOLDOWN_MS = 1200; // 同一コードの連続登録防止
+const MAX_ROWS = 500;
 
 /* ========= GS1パーサ（01/17/10） ========= */
 const GS = String.fromCharCode(29);
@@ -117,36 +151,28 @@ const GS = String.fromCharCode(29);
 function normalizeRaw(raw){
   if(!raw) return "";
   raw = raw.trim();
-
-  // Symbology Identifier の除去（Cognex等）
-  // 例：]C101.... / ]E0.... など
+  // Symbology Identifier 除去（Cognex等）
   if(raw.startsWith("]C1") || raw.startsWith("]c1")) raw = raw.slice(3);
   if(raw.startsWith("]E0") || raw.startsWith("]e0")) raw = raw.slice(3);
-
-  // (01)049... のような括弧表記も想定して簡易除去
+  // (01)形式簡易対応
   raw = raw.replace(/\(/g,"").replace(/\)/g,"");
   return raw;
 }
-
 function formatYYMMDD(yymmdd){
   if(!/^\d{6}$/.test(yymmdd)) return "";
   const yy = parseInt(yymmdd.slice(0,2),10);
   const mm = yymmdd.slice(2,4);
   const dd = yymmdd.slice(4,6);
-  const yyyy = 2000 + yy; // 必要なら 19xx/20xx の判定も追加可能
+  const yyyy = 2000 + yy;
   return `${yyyy}-${mm}-${dd}`;
 }
-
 function parseGS1(rawInput){
   const s = normalizeRaw(rawInput);
   const out = { gtin:"", exp:"", lot:"" };
   let i = 0;
-
   while(i < s.length){
     if(s[i] === GS){ i++; continue; }
-
     const ai2 = s.slice(i, i+2);
-
     if(ai2 === "01"){
       const v = s.slice(i+2, i+16);
       if(/^\d{14}$/.test(v)) out.gtin = v;
@@ -169,10 +195,55 @@ function parseGS1(rawInput){
   return out;
 }
 
-/* ========= 履歴 / CSV ========= */
+/* ========= UI参照 ========= */
+const videoEl = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d");
+
+const btnStart = document.getElementById("btnStart");
+const btnStop  = document.getElementById("btnStop");
+const btnTorch = document.getElementById("btnTorch");
+const statusEl = document.getElementById("status");
+const modeEl   = document.getElementById("mode");
+
+const zoomEl = document.getElementById("zoom");
+const zoomInfo = document.getElementById("zoomInfo");
+
+const manualEl = document.getElementById("manual");
+const debugEl = document.getElementById("debug");
+
+const lastRawEl = document.getElementById("lastRaw");
+const lastGTINEl = document.getElementById("lastGTIN");
+const lastEXPEl = document.getElementById("lastEXP");
+const lastLOTEl = document.getElementById("lastLOT");
+
+const tbody = document.getElementById("tbody");
+
+/* ========= 状態 ========= */
 let rows = [];
 let lastSeen = new Map();
 
+let stream = null;
+let track = null;
+let torchOn = false;
+
+let running = false;
+let quaggaRunning = false;
+let zxingRunning = false;
+
+/* ZXing（2D用：Try harder + 主要フォーマット） */
+const zxingHints = new Map();
+zxingHints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+zxingHints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+  ZXing.BarcodeFormat.QR_CODE,
+  ZXing.BarcodeFormat.DATA_MATRIX,
+  ZXing.BarcodeFormat.AZTEC,
+  ZXing.BarcodeFormat.PDF_417
+]);
+let zxingReader = new ZXing.BrowserMultiFormatReader(zxingHints, 300);
+
+/* ========= 共通 ========= */
+function setStatus(t){ statusEl.textContent = t; }
 function escapeHtml(s){
   return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
@@ -182,19 +253,7 @@ function csvEscape(v){
   return s;
 }
 
-function addRow(raw){
-  const now = new Date();
-  const time = now.toLocaleString();
-
-  const parsed = parseGS1(raw);
-  rows.push({ time, gtin:parsed.gtin, exp:parsed.exp, lot:parsed.lot, raw });
-
-  if(rows.length > MAX_ROWS) rows.shift();
-  render();
-}
-
 function render(){
-  const tbody = document.getElementById("tbody");
   tbody.innerHTML = "";
   for(const r of rows){
     const tr = document.createElement("tr");
@@ -209,6 +268,240 @@ function render(){
   }
 }
 
+function addDetected(raw){
+  if(!raw) return;
+  const nowMs = Date.now();
+  const last = lastSeen.get(raw) || 0;
+  if(nowMs - last < SCAN_COOLDOWN_MS) return;
+  lastSeen.set(raw, nowMs);
+
+  const parsed = parseGS1(raw);
+  const time = new Date().toLocaleString();
+
+  const rec = { time, gtin:parsed.gtin, exp:parsed.exp, lot:parsed.lot, raw };
+  rows.push(rec);
+  if(rows.length > MAX_ROWS) rows.shift();
+
+  // 直近表示
+  lastRawEl.textContent  = raw;
+  lastGTINEl.textContent = parsed.gtin || "";
+  lastEXPEl.textContent  = parsed.exp  || "";
+  lastLOTEl.textContent  = parsed.lot  || "";
+
+  // バイブ
+  if(navigator.vibrate) navigator.vibrate(30);
+
+  // 簡易ビープ
+  try{
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(); const g = ac.createGain();
+    o.frequency.value = 880; g.gain.value = 0.02;
+    o.connect(g); g.connect(ac.destination);
+    o.start(); setTimeout(()=>{ o.stop(); ac.close(); }, 80);
+  }catch(e){}
+
+  setStatus("読み取りOK");
+  render();
+}
+
+function resizeOverlay(){
+  const rect = videoEl.getBoundingClientRect();
+  overlay.width = Math.floor(rect.width * devicePixelRatio);
+  overlay.height = Math.floor(rect.height * devicePixelRatio);
+  overlay.style.width = rect.width + "px";
+  overlay.style.height = rect.height + "px";
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+}
+window.addEventListener("resize", resizeOverlay);
+
+/* ========= カメラ開始（背面固定 + 高解像度要求） ========= */
+async function startCamera(){
+  // 既に動いてたら停止
+  await stopAll();
+
+  setStatus("カメラ起動中…");
+
+  const constraints = {
+    audio: false,
+    video: {
+      facingMode: { ideal: "environment" },
+      width:  { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 30, max: 30 }
+    }
+  };
+
+  stream = await navigator.mediaDevices.getUserMedia(constraints);
+  videoEl.srcObject = stream;
+
+  // iOSはplay明示が安定
+  await videoEl.play().catch(()=>{});
+
+  track = stream.getVideoTracks()[0] || null;
+
+  resizeOverlay();
+
+  // トーチ/ズーム対応判定
+  const caps = track?.getCapabilities?.() || {};
+  btnTorch.disabled = !caps.torch;
+
+  if(caps.zoom){
+    zoomEl.disabled = false;
+    zoomEl.min = caps.zoom.min;
+    zoomEl.max = caps.zoom.max;
+    zoomEl.step = caps.zoom.step || 0.1;
+    zoomEl.value = caps.zoom.min;
+    zoomInfo.textContent = `ズーム：対応（${caps.zoom.min}〜${caps.zoom.max}）`;
+  }else{
+    zoomEl.disabled = true;
+    zoomInfo.textContent = "ズーム：未対応";
+  }
+
+  running = true;
+  btnStart.disabled = true;
+  btnStop.disabled = false;
+
+  setStatus("スキャン開始中…");
+}
+
+/* ========= 1D（Quagga2：Code128専用） ========= */
+function start1D(){
+  if(quaggaRunning) return;
+  // Quaggaは内部でStreamを扱うので、video要素をtargetにする
+  Quagga.init({
+    inputStream: {
+      type: "LiveStream",
+      target: document.getElementById("viewport"),
+      constraints: {
+        facingMode: "environment",
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    },
+    decoder: { readers: ["code_128_reader"] }, // GS1-128=Code128
+    locate: true,
+    numOfWorkers: navigator.hardwareConcurrency ? Math.min(4, navigator.hardwareConcurrency) : 2
+  }, (err) => {
+    if(err){
+      console.error(err);
+      debugEl.textContent = "1D初期化失敗：HTTPS/カメラ許可/端末を確認";
+      return;
+    }
+    Quagga.start();
+    quaggaRunning = true;
+  });
+
+  Quagga.offDetected(); // 二重登録防止
+  Quagga.onDetected((data) => {
+    const raw = data?.codeResult?.code;
+    if(raw){
+      addDetected(raw);
+    }
+  });
+
+  Quagga.offProcessed();
+  Quagga.onProcessed((result) => {
+    // ガイド表示（検出枠）
+    try{
+      ctx.clearRect(0,0,overlay.width,overlay.height);
+      if(result && result.boxes){
+        const vw = overlay.clientWidth;
+        const vh = overlay.clientHeight;
+        // Quaggaの座標系はviewport依存で崩れることがあるので簡易表示のみ
+      }
+    }catch(e){}
+  });
+}
+
+/* ========= 2D（ZXing） ========= */
+async function start2D(){
+  if(zxingRunning) return;
+  zxingRunning = true;
+
+  // 2Dはvideo elementから読む
+  zxingReader.decodeFromVideoElement(videoEl, (result, err) => {
+    if(!running || !zxingRunning) return;
+    if(result){
+      const raw = result.getText ? result.getText() : result.text;
+      if(raw) addDetected(raw);
+    }
+  });
+}
+
+/* ========= スキャン開始（モード別） ========= */
+async function startScan(){
+  await startCamera();
+
+  const mode = modeEl.value;
+  if(mode === "1d"){
+    start1D();
+    setStatus("スキャン中（1D:Code128）");
+  }else if(mode === "2d"){
+    await start2D();
+    setStatus("スキャン中（2D:QR/DataMatrix）");
+  }else{
+    // auto：両方起動（実運用最強）
+    start1D();
+    await start2D();
+    setStatus("スキャン中（自動：1D+2D）");
+  }
+}
+
+/* ========= 停止 ========= */
+async function stopAll(){
+  // Quagga停止
+  try{
+    if(quaggaRunning){
+      Quagga.stop();
+      quaggaRunning = false;
+    }
+  }catch(e){}
+
+  // ZXing停止
+  try{
+    zxingReader?.reset();
+  }catch(e){}
+  zxingRunning = false;
+
+  // カメラ停止
+  try{
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+    }
+  }catch(e){}
+  stream = null;
+  track = null;
+  torchOn = false;
+
+  running = false;
+  btnStart.disabled = false;
+  btnStop.disabled = true;
+  btnTorch.disabled = true;
+
+  setStatus("停止中");
+}
+
+/* ========= ライト / ズーム ========= */
+async function toggleTorch(){
+  if(!track) return;
+  const caps = track.getCapabilities?.();
+  if(!caps || !caps.torch){
+    alert("この端末/ブラウザはライト制御に非対応です");
+    return;
+  }
+  torchOn = !torchOn;
+  await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト";
+}
+
+async function setZoom(v){
+  if(!track) return;
+  const caps = track.getCapabilities?.();
+  if(!caps || !caps.zoom) return;
+  await track.applyConstraints({ advanced: [{ zoom: Number(v) }] });
+}
+
+/* ========= CSV ========= */
 function downloadCSV(){
   let csv = "time,gtin,exp,lot,raw\n";
   for(const r of rows){
@@ -221,129 +514,46 @@ function downloadCSV(){
   a.click();
 }
 
-/* ========= ZXing（背面固定） ========= */
-let codeReader = null;
-let currentTrack = null;
-let torchOn = false;
-let decoding = false;
-
-const statusEl = document.getElementById("status");
-const btnStart = document.getElementById("btnStart");
-const btnStop  = document.getElementById("btnStop");
-const btnTorch = document.getElementById("btnTorch");
-const videoEl  = document.getElementById("video");
-const manualEl = document.getElementById("manual");
-
-function setStatus(t){ statusEl.textContent = t; }
-
-async function startCameraBack(){
-  if(!window.ZXing){ alert("ZXingライブラリ読み込み失敗"); return; }
-
-  // 先に背面カメラで stream を確保（facingMode: environment）
-  setStatus("カメラ起動中…");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: { ideal: "environment" } },
-    audio: false
-  });
-  videoEl.srcObject = stream;
-
-  currentTrack = stream.getVideoTracks()[0] || null;
-  btnTorch.disabled = !(currentTrack && currentTrack.getCapabilities && currentTrack.getCapabilities().torch);
-
-  // ZXingで読み取り開始（video elementから）
-  if(codeReader) { try{ codeReader.reset(); }catch(e){} }
-  codeReader = new ZXing.BrowserMultiFormatReader();
-
-  decoding = true;
-
-  codeReader.decodeFromVideoElement(videoEl, (result, err) => {
-    if(!decoding) return;
-    if(result){
-      const raw = result.getText ? result.getText() : result.text;
-      if(!raw) return;
-
-      const now = Date.now();
-      const last = lastSeen.get(raw) || 0;
-      if(now - last < SCAN_COOLDOWN_MS) return;
-      lastSeen.set(raw, now);
-
-      // バイブ（対応端末のみ）
-      if(navigator.vibrate) navigator.vibrate(30);
-
-      // 音（無音でもOKな簡易ビープ）
-      try{
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const o = ctx.createOscillator(); const g = ctx.createGain();
-        o.frequency.value = 880; g.gain.value = 0.02;
-        o.connect(g); g.connect(ctx.destination);
-        o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, 80);
-      }catch(e){}
-
-      addRow(raw);
-      setStatus("読み取りOK");
-    }
-  });
-
-  btnStart.disabled = true;
-  btnStop.disabled = false;
-  setStatus("スキャン中（背面）");
-}
-
-async function stopCamera(){
-  decoding = false;
-  try{
-    if(codeReader){ codeReader.reset(); codeReader = null; }
-  }catch(e){}
-  try{
-    const stream = videoEl.srcObject;
-    if(stream){ stream.getTracks().forEach(t => t.stop()); }
-    videoEl.srcObject = null;
-  }catch(e){}
-  currentTrack = null;
-  torchOn = false;
-  btnTorch.textContent = "ライト";
-  btnTorch.disabled = true;
-
-  btnStart.disabled = false;
-  btnStop.disabled = true;
-  setStatus("停止中");
-}
-
-async function toggleTorch(){
-  if(!currentTrack) return;
-  const caps = currentTrack.getCapabilities?.();
-  if(!caps || !caps.torch){
-    alert("この端末/ブラウザはライト制御に非対応です");
-    return;
-  }
-  torchOn = !torchOn;
-  await currentTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト";
-}
-
-/* ========= UIイベント ========= */
+/* ========= イベント ========= */
 btnStart.addEventListener("click", async ()=>{
+  debugEl.textContent = "";
   try{
-    await startCameraBack();
+    await startScan();
   }catch(e){
-    alert("カメラ許可が必要です。iPhoneはHTTPSで開いてください。");
+    console.error(e);
+    alert("カメラ起動に失敗しました。iPhoneはHTTPS必須、カメラ許可を確認してください。");
     setStatus("起動失敗");
+    debugEl.textContent = "起動失敗：HTTPS/権限/端末を確認";
   }
 });
-btnStop.addEventListener("click", stopCamera);
+
+btnStop.addEventListener("click", stopAll);
 btnTorch.addEventListener("click", toggleTorch);
 
+zoomEl.addEventListener("input", (e)=> setZoom(e.target.value));
+
 document.getElementById("btnCsv").addEventListener("click", downloadCSV);
+
 document.getElementById("btnClear").addEventListener("click", ()=>{
-  rows = []; lastSeen.clear(); render(); setStatus("履歴クリア");
+  rows = [];
+  lastSeen.clear();
+  render();
+  lastRawEl.textContent = "";
+  lastGTINEl.textContent = "";
+  lastEXPEl.textContent = "";
+  lastLOTEl.textContent = "";
+  setStatus("履歴クリア");
 });
+
 document.getElementById("btnManual").addEventListener("click", ()=>{
   const v = manualEl.value.trim();
   if(!v) return;
-  addRow(v);
+  addDetected(v);
   manualEl.value = "";
-  setStatus("手入力を追加");
 });
+
+/* ========= 初期表示 ========= */
+setStatus("待機中（開始を押してください）");
 </script>
 </body>
 </html>
