@@ -1,1127 +1,433 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>在庫管理 Pro</title>
-<style>
-/* ===== RESET & BASE ===== */
-*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-:root {
-  --bg:#0f1117; --surface:#1a1d27; --surface2:#232636; --border:#2e3248;
-  --accent:#3b82f6; --accent2:#06b6d4; --success:#22c55e; --danger:#ef4444; --warn:#f59e0b;
-  --text:#f1f5f9; --text2:#94a3b8; --text3:#64748b;
-  --r:12px; --r-sm:8px;
-}
-body { font-family:-apple-system,'Hiragino Sans','SF Pro Display',sans-serif; background:var(--bg); color:var(--text); min-height:100dvh; overflow-x:hidden; }
-
-/* ===== BOTTOM NAV ===== */
-.bottom-nav { position:fixed; bottom:0; left:0; right:0; z-index:100;
-  background:rgba(26,29,39,0.95); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
-  border-top:1px solid var(--border); display:flex; padding-bottom:env(safe-area-inset-bottom,0); }
-.nav-btn { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
-  padding:10px 4px; background:none; border:none; color:var(--text3); cursor:pointer;
-  font-size:11px; font-weight:500; transition:color 0.15s; }
-.nav-btn.active { color:var(--accent); }
-.nav-btn svg { width:22px; height:22px; }
-
-/* ===== PAGES ===== */
-.page { display:none; min-height:100dvh; padding-bottom:80px; }
-.page.active { display:block; }
-.page-header { padding:20px 16px 12px; padding-top:calc(env(safe-area-inset-top,0) + 20px);
-  display:flex; align-items:center; justify-content:space-between; }
-.page-title { font-size:22px; font-weight:700; }
-
-/* ===== SCANNER PAGE ===== */
-#page-scanner { padding-bottom:0; display:none; flex-direction:column; background:#000; }
-#page-scanner.active { display:flex; }
-
-.scanner-viewport { position:relative; flex:1; overflow:hidden; min-height:0;
-  display:flex; align-items:center; justify-content:center; }
-#scanner-video { width:100%; height:100%; object-fit:cover; }
-#scanner-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
-
-.scanner-controls { position:absolute; bottom:0; left:0; right:0;
-  background:linear-gradient(transparent,rgba(0,0,0,0.8)); padding:16px 20px 20px; }
-.scanner-btn-row { display:flex; gap:12px; justify-content:center; margin-bottom:12px; }
-.scanner-icon-btn { width:48px; height:48px; border-radius:50%; border:2px solid rgba(255,255,255,0.3);
-  background:rgba(255,255,255,0.1); backdrop-filter:blur(10px); color:#fff; display:flex;
-  align-items:center; justify-content:center; cursor:pointer; transition:all 0.15s; }
-.scanner-icon-btn.active { background:rgba(255,220,0,0.3); border-color:gold; color:gold; }
-.scanner-icon-btn svg { width:20px; height:20px; }
-.scanner-main-btn { width:72px; height:72px; border-radius:50%; background:var(--accent);
-  border:4px solid rgba(255,255,255,0.2); color:#fff; display:flex; align-items:center;
-  justify-content:center; cursor:pointer; transition:all 0.15s; box-shadow:0 0 0 0 rgba(59,130,246,0.4); }
-.scanner-main-btn.scanning { background:var(--danger); animation:pulse-ring 2s infinite; }
-.scanner-main-btn svg { width:28px; height:28px; }
-@keyframes pulse-ring { 0%{box-shadow:0 0 0 0 rgba(59,130,246,0.5)} 70%{box-shadow:0 0 0 20px rgba(59,130,246,0)} 100%{box-shadow:0 0 0 0 rgba(59,130,246,0)} }
-
-.scanner-status { text-align:center; font-size:13px; color:rgba(255,255,255,0.7); margin-top:8px; min-height:20px; }
-
-/* Zoom slider */
-.zoom-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; color:rgba(255,255,255,0.7); font-size:12px; }
-.zoom-row input[type=range] { flex:1; height:4px; -webkit-appearance:none; appearance:none;
-  background:rgba(255,255,255,0.3); border-radius:2px; outline:none; cursor:pointer; }
-.zoom-row input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px;
-  border-radius:50%; background:#fff; cursor:pointer; }
-#zoom-slider-row { display:none; }
-
-/* Scanner top overlay */
-.scanner-top { position:absolute; top:0; left:0; right:0; padding:16px;
-  padding-top:calc(env(safe-area-inset-top,0) + 12px);
-  background:linear-gradient(rgba(0,0,0,0.7),transparent);
-  display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; }
-.scan-mode-badge { background:rgba(59,130,246,0.8); color:#fff; font-size:12px; font-weight:700;
-  padding:4px 10px; border-radius:20px; }
-.scan-format-badge { background:rgba(0,0,0,0.6); color:rgba(255,255,255,0.8); font-size:11px;
-  padding:3px 8px; border-radius:12px; }
-
-/* ===== SCAN RESULT PANEL ===== */
-.scan-result-panel { position:fixed; bottom:0; left:0; right:0; z-index:500;
-  background:var(--surface); border-top-left-radius:20px; border-top-right-radius:20px;
-  padding:16px 16px calc(env(safe-area-inset-bottom,0) + 80px);
-  transform:translateY(100%); transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
-  box-shadow:0 -8px 40px rgba(0,0,0,0.5); max-height:70dvh; overflow-y:auto; }
-.scan-result-panel.show { transform:translateY(0); }
-.panel-drag-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 14px; }
-
-.result-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-.result-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0; }
-.result-icon.found { background:#166534; }
-.result-icon.new { background:#92400e; }
-.result-name { font-size:16px; font-weight:700; line-height:1.3; }
-.result-sub { font-size:12px; color:var(--text3); margin-top:2px; font-family:monospace; word-break:break-all; }
-
-/* GS1 fields */
-.gs1-section { background:var(--surface2); border-radius:var(--r-sm); padding:12px; margin-bottom:12px; }
-.gs1-section-title { font-size:11px; font-weight:700; color:var(--accent2); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px; }
-.gs1-fields { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-.gs1-field { background:var(--bg); border-radius:6px; padding:8px 10px; }
-.gs1-field-label { font-size:10px; color:var(--text3); font-weight:600; text-transform:uppercase; }
-.gs1-field-value { font-size:13px; font-weight:700; color:var(--text); font-family:monospace; margin-top:1px; }
-.gs1-field-value.expiry-ok { color:var(--success); }
-.gs1-field-value.expiry-warn { color:var(--warn); }
-.gs1-field-value.expiry-exp { color:var(--danger); }
-.gs1-field.full-width { grid-column:1/-1; }
-
-/* Quick action buttons */
-.action-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
-.action-btn { padding:12px; border-radius:var(--r-sm); border:none; font-size:14px; font-weight:600;
-  cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; min-height:48px; }
-.action-btn.in { background:#166534; color:#86efac; }
-.action-btn.out { background:#7c2d12; color:#fdba74; }
-.action-btn.add { background:#1e3a5f; color:#93c5fd; }
-.action-btn.search { background:var(--surface2); color:var(--text2); }
-
-/* ===== INVENTORY PAGE ===== */
-.scroll-content { padding:0 16px 16px; }
-.search-box { position:relative; margin-bottom:14px; }
-.search-box input { width:100%; padding:11px 16px 11px 40px; background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--r); font-size:16px; color:var(--text); outline:none; }
-.search-box input:focus { border-color:var(--accent); }
-.search-box svg { position:absolute; left:12px; top:50%; transform:translateY(-50%); width:18px; height:18px; color:var(--text3); pointer-events:none; }
-
-.product-card { background:var(--surface); border-radius:var(--r); padding:14px; margin-bottom:8px;
-  border:1px solid var(--border); display:flex; align-items:flex-start; gap:12px; cursor:pointer;
-  transition:border-color 0.15s; }
-.product-card:hover, .product-card:active { border-color:var(--accent); }
-.product-card-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center;
-  justify-content:center; font-size:18px; flex-shrink:0; background:var(--surface2); }
-.product-card-body { flex:1; min-width:0; }
-.product-card-name { font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.product-card-meta { font-size:12px; color:var(--text3); margin-top:2px; font-family:monospace; }
-.product-card-right { text-align:right; flex-shrink:0; }
-.stock-num { font-size:22px; font-weight:800; line-height:1; }
-.stock-num.ok { color:var(--success); }
-.stock-num.low { color:var(--warn); }
-.stock-num.zero { color:var(--danger); }
-.stock-label { font-size:11px; color:var(--text3); margin-top:2px; }
-.expiry-chip { display:inline-block; font-size:11px; padding:2px 6px; border-radius:10px; margin-top:4px; font-weight:600; }
-.expiry-chip.ok { background:#14532d; color:#86efac; }
-.expiry-chip.warn { background:#451a03; color:#fcd34d; }
-.expiry-chip.exp { background:#450a0a; color:#fca5a5; }
-
-.empty-state { text-align:center; padding:60px 20px; color:var(--text3); }
-.empty-state-icon { font-size:48px; margin-bottom:12px; }
-
-/* ===== HISTORY PAGE ===== */
-.history-item { padding:12px 0; border-bottom:1px solid var(--border); display:flex; align-items:flex-start; gap:12px; }
-.history-badge { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
-.history-badge.in { background:#14532d; }
-.history-badge.out { background:#450a0a; }
-.history-name { font-size:14px; font-weight:600; }
-.history-meta { font-size:12px; color:var(--text3); margin-top:1px; }
-.history-qty { font-size:18px; font-weight:800; flex-shrink:0; }
-.history-qty.in { color:var(--success); }
-.history-qty.out { color:var(--danger); }
-
-/* ===== MODAL (Add/Edit product) ===== */
-.modal-overlay { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.7);
-  display:none; align-items:flex-end; justify-content:center; padding:0; }
-.modal-overlay.show { display:flex; }
-.modal { background:var(--surface); border-top-left-radius:20px; border-top-right-radius:20px;
-  width:100%; max-height:90dvh; overflow-y:auto;
-  padding:16px 20px calc(env(safe-area-inset-bottom,0) + 24px); }
-.modal-handle { width:36px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 16px; }
-.modal-title { font-size:18px; font-weight:700; margin-bottom:16px; }
-.form-label { display:block; font-size:12px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px; margin-top:12px; }
-.form-label:first-of-type { margin-top:0; }
-.form-input { width:100%; padding:11px 12px; background:var(--surface2); border:1px solid var(--border);
-  border-radius:var(--r-sm); font-size:16px; color:var(--text); outline:none; }
-.form-input:focus { border-color:var(--accent); }
-.form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.gs1-autofill-banner { background:#1e3a5f; border-radius:var(--r-sm); padding:10px 12px;
-  font-size:13px; color:#93c5fd; display:flex; gap:8px; align-items:center; margin-bottom:4px; }
-
-/* ===== STOCK IO MODAL ===== */
-.qty-modal { background:var(--surface); border-radius:var(--r); padding:20px; width:calc(100% - 40px); max-width:360px; }
-.qty-row { display:flex; align-items:center; justify-content:center; gap:20px; margin:16px 0; }
-.qty-btn { width:52px; height:52px; border-radius:50%; border:2px solid var(--border); background:var(--surface2);
-  color:var(--text); font-size:24px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.qty-input { width:80px; text-align:center; font-size:28px; font-weight:800; background:none;
-  border:none; color:var(--text); outline:none; }
-.qty-confirm { width:100%; padding:14px; border-radius:var(--r); border:none; font-size:16px; font-weight:700;
-  cursor:pointer; color:#fff; }
-.qty-confirm.in { background:var(--success); }
-.qty-confirm.out { background:var(--danger); }
-
-/* ===== FAB ===== */
-.fab { position:fixed; right:20px; bottom:80px; width:52px; height:52px; border-radius:50%;
-  background:var(--accent); color:#fff; border:none; cursor:pointer; display:flex;
-  align-items:center; justify-content:center; box-shadow:0 4px 20px rgba(59,130,246,0.4);
-  z-index:50; transition:transform 0.15s; }
-.fab:active { transform:scale(0.92); }
-.fab svg { width:22px; height:22px; }
-.fab { display:none; }
-#page-inventory.active ~ .fab, #page-inventory + * .fab { display:flex; }
-
-/* ===== TOAST ===== */
-.toast-wrap { position:fixed; top:calc(env(safe-area-inset-top,0) + 16px); left:50%; transform:translateX(-50%);
-  z-index:2000; display:flex; flex-direction:column; align-items:center; gap:8px; width:min(320px,90vw); }
-.toast { background:rgba(30,33,50,0.95); backdrop-filter:blur(20px); color:var(--text);
-  padding:10px 16px; border-radius:30px; font-size:14px; font-weight:600; white-space:nowrap;
-  animation:toastIn 0.3s ease; border:1px solid var(--border); box-shadow:0 4px 20px rgba(0,0,0,0.4); }
-.toast.success { border-color:var(--success); color:var(--success); }
-.toast.error { border-color:var(--danger); color:var(--danger); }
-@keyframes toastIn { from{opacity:0;transform:translateY(-12px)scale(0.9)}to{opacity:1;transform:translateY(0)scale(1)} }
-
-/* ===== MISC ===== */
-.badge { display:inline-block; padding:3px 8px; border-radius:12px; font-size:11px; font-weight:700; }
-.badge-blue { background:#1e3a5f; color:#93c5fd; }
-.badge-green { background:#14532d; color:#86efac; }
-.modal-overlay-center { align-items:center; justify-content:center; padding:20px; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>検査室 GS1スキャナ（CSV出力）</title>
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <style>
+    :root { --bg:#0b1220; --card:#111b2e; --txt:#e6edf7; --sub:#9bb0d1; --btn:#2b6cff; --danger:#ff4d4d; }
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Segoe UI",sans-serif;background:var(--bg);color:var(--txt);}
+    header{padding:14px 16px;background:linear-gradient(180deg,#0f1a33,#0b1220);position:sticky;top:0;z-index:5}
+    h1{font-size:16px;margin:0 0 6px 0}
+    .sub{font-size:12px;color:var(--sub);line-height:1.4}
+    .wrap{padding:14px 16px;max-width:980px;margin:0 auto}
+    .grid{display:grid;gap:12px}
+    @media (min-width:860px){ .grid{grid-template-columns: 1.15fr 0.85fr;} }
+    .card{background:var(--card);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:12px}
+    video{width:100%;border-radius:12px;background:#000;aspect-ratio: 3/4;object-fit:cover}
+    .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    button{
+      border:0;border-radius:12px;padding:11px 12px;font-size:14px;
+      background:rgba(255,255,255,0.08);color:var(--txt);cursor:pointer
+    }
+    button.primary{background:var(--btn)}
+    button.danger{background:rgba(255,77,77,0.18);color:#ffd2d2}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    select,input{
+      width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.12);
+      background:rgba(255,255,255,0.06);color:var(--txt);outline:none
+    }
+    label{font-size:12px;color:var(--sub);display:block;margin:10px 0 6px}
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{border-bottom:1px solid rgba(255,255,255,0.10);padding:8px 6px;vertical-align:top}
+    th{color:var(--sub);text-align:left;font-weight:600}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;background:rgba(255,255,255,0.08);font-size:11px;color:var(--sub)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .hint{font-size:12px;color:var(--sub);line-height:1.5}
+    .ok{color:#a7ffbf}
+    .warn{color:#ffd28a}
+  </style>
 </head>
 <body>
+<header>
+  <h1>検査室 GS1スキャナ（GS1-128 / Code128）</h1>
+  <div class="sub">iPhoneはHTTPS必須。スキャン→GTIN/期限/LOT自動分解→CSVダウンロード。</div>
+</header>
 
-<!-- ===================== SCANNER PAGE ===================== -->
-<div class="page active" id="page-scanner">
-  <div class="scanner-viewport">
-    <video id="scanner-video" autoplay playsinline muted></video>
-    <canvas id="scanner-canvas"></canvas>
+<div class="wrap">
+  <div class="grid">
+    <div class="card">
+      <video id="video" playsinline></video>
 
-    <div class="scanner-top">
-      <div>
-        <div class="scan-mode-badge" id="scan-mode-badge">BarcodeDetector</div>
-        <div class="scan-format-badge" style="margin-top:4px;" id="scan-format-badge">GS1-128 • QR • EAN • DataMatrix</div>
+      <div class="row">
+        <button class="primary" id="btnStart">カメラ開始</button>
+        <button id="btnStop" disabled>停止</button>
+        <button id="btnTorch" disabled>ライト(トーチ)</button>
+        <span class="pill" id="status">待機中</span>
       </div>
-    </div>
 
-    <div class="scanner-controls">
-      <div id="zoom-slider-row" class="zoom-row">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
-        <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1" oninput="applyZoom(this.value)">
-        <span id="zoom-label" style="min-width:28px;text-align:right;">×1</span>
+      <label>カメラ選択</label>
+      <select id="cameraSelect"></select>
+
+      <label>手入力 / 貼り付け（Cognexの ]C1… でもOK）</label>
+      <input id="manual" class="mono" placeholder="例：]C101049123456789031724033110ABC123" />
+      <div class="row">
+        <button id="btnManual">解析して追加</button>
       </div>
-      <div class="scanner-btn-row">
-        <button class="scanner-icon-btn" id="torch-btn" onclick="toggleTorch()" title="フラッシュ" style="display:none;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-        </button>
-        <button class="scanner-main-btn" id="main-scan-btn" onclick="toggleScanner()">
-          <svg id="main-btn-icon-start" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-          <svg id="main-btn-icon-stop" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
-        <button class="scanner-icon-btn" id="manual-btn" onclick="openManualEntry()" title="手動入力">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
+
+      <p class="hint">
+        <span class="ok">✅ 推奨：</span>ラベル全体が映る距離 → ゆっくり近づける。<br/>
+        <span class="warn">⚠ よくある原因：</span>暗い/反射/ブレ/ラベルが小さい → ライトON、明るい場所、固定。
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button class="primary" id="btnCsv">CSVダウンロード</button>
+        <button class="danger" id="btnClear">履歴クリア</button>
       </div>
-      <div class="scanner-status" id="scan-status">カメラボタンを押してスキャン開始</div>
+
+      <label>履歴（最新が下）</label>
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th style="width:140px">時刻</th>
+            <th style="width:160px">GTIN(01)</th>
+            <th style="width:110px">期限(17)</th>
+            <th style="width:140px">LOT(10)</th>
+            <th>生データ</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <p class="hint">
+        CSV列：time,gtin,exp,lot,raw<br/>
+        exp は YYMMDD → 20YY-MM-DD に整形（年は 2000年代扱い）
+      </p>
     </div>
   </div>
 </div>
-
-<!-- ===================== INVENTORY PAGE ===================== -->
-<div class="page" id="page-inventory">
-  <div class="page-header">
-    <div class="page-title">在庫一覧</div>
-    <button onclick="openProductModal()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">＋ 追加</button>
-  </div>
-  <div style="padding:0 16px;">
-    <div class="search-box">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="search-input" placeholder="物品名・バーコード・GTIN・ロットで検索" oninput="renderInventory()">
-    </div>
-    <div id="inventory-list"></div>
-  </div>
-</div>
-
-<!-- ===================== HISTORY PAGE ===================== -->
-<div class="page" id="page-history">
-  <div class="page-header">
-    <div class="page-title">入出庫履歴</div>
-    <button onclick="exportHistoryCSV()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;">CSV</button>
-  </div>
-  <div style="padding:0 16px;">
-    <div id="history-list"></div>
-  </div>
-</div>
-
-<!-- ===================== BOTTOM NAV ===================== -->
-<nav class="bottom-nav">
-  <button class="nav-btn active" data-page="scanner" onclick="switchPage('scanner',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-    スキャン
-  </button>
-  <button class="nav-btn" data-page="inventory" onclick="switchPage('inventory',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-    在庫
-  </button>
-  <button class="nav-btn" data-page="history" onclick="switchPage('history',this)">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    履歴
-  </button>
-</nav>
-
-<!-- ===================== SCAN RESULT PANEL ===================== -->
-<div class="scan-result-panel" id="scan-result-panel">
-  <div class="panel-drag-handle"></div>
-  <div class="result-header">
-    <div class="result-icon" id="result-icon">📦</div>
-    <div>
-      <div class="result-name" id="result-name">—</div>
-      <div class="result-sub" id="result-raw">—</div>
-    </div>
-  </div>
-  <div id="gs1-panel"></div>
-  <div class="action-row">
-    <button class="action-btn in" onclick="quickStockIO('in')">📥 入庫</button>
-    <button class="action-btn out" onclick="quickStockIO('out')">📤 出庫</button>
-    <button class="action-btn add" id="action-add-btn" onclick="quickRegister()">＋ 新規登録</button>
-    <button class="action-btn search" onclick="closeResultPanel();switchPage('inventory',document.querySelector('[data-page=inventory]'));">🔍 在庫を見る</button>
-  </div>
-  <button onclick="closeResultPanel();toggleScanner();" style="width:100%;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text2);font-size:14px;cursor:pointer;margin-top:4px;">続けてスキャン</button>
-</div>
-
-<!-- ===================== PRODUCT MODAL ===================== -->
-<div class="modal-overlay" id="product-modal-overlay" onclick="if(event.target===this)closeProductModal()">
-<div class="modal" id="product-modal">
-  <div class="modal-handle"></div>
-  <div class="modal-title" id="product-modal-title">新規物品登録</div>
-  <input type="hidden" id="pm-id">
-  <div id="gs1-autofill-banner" class="gs1-autofill-banner" style="display:none;">
-    <span>🔍</span><span>GS1スキャン結果から自動入力しました</span>
-  </div>
-  <label class="form-label">バーコード *</label>
-  <input class="form-input" id="pm-barcode" placeholder="スキャン結果または手動入力">
-  <label class="form-label">物品名 *</label>
-  <input class="form-input" id="pm-name" placeholder="物品名">
-  <div class="form-grid-2">
-    <div><label class="form-label">GTIN (14桁)</label><input class="form-input" id="pm-gtin" placeholder="04987..."></div>
-    <div><label class="form-label">ロット番号</label><input class="form-input" id="pm-lot" placeholder="LOT番号"></div>
-  </div>
-  <div class="form-grid-2">
-    <div><label class="form-label">有効期限</label><input type="date" class="form-input" id="pm-expiry"></div>
-    <div><label class="form-label">製造番号</label><input class="form-input" id="pm-serial" placeholder="製造番号"></div>
-  </div>
-  <div class="form-grid-2">
-    <div><label class="form-label">在庫数</label><input type="number" class="form-input" id="pm-stock" value="0" min="0"></div>
-    <div><label class="form-label">不足しきい値</label><input type="number" class="form-input" id="pm-threshold" value="10" min="0"></div>
-  </div>
-  <div class="form-grid-2">
-    <div><label class="form-label">単価（円）</label><input type="number" class="form-input" id="pm-price" value="0" min="0"></div>
-    <div><label class="form-label">カテゴリ</label>
-      <select class="form-input" id="pm-category">
-        <option value="注射薬">注射薬</option><option value="内服薬">内服薬</option>
-        <option value="外用薬">外用薬</option><option value="医療材料">医療材料</option>
-        <option value="衛生材料">衛生材料</option><option value="医療機器">医療機器</option>
-        <option value="その他">その他</option>
-      </select>
-    </div>
-  </div>
-  <div style="display:flex;gap:10px;margin-top:20px;">
-    <button onclick="closeProductModal()" style="flex:1;padding:13px;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:15px;cursor:pointer;">キャンセル</button>
-    <button onclick="saveProduct()" style="flex:2;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:var(--r-sm);font-size:15px;font-weight:700;cursor:pointer;">保存</button>
-  </div>
-</div>
-</div>
-
-<!-- ===================== QTY MODAL ===================== -->
-<div class="modal-overlay modal-overlay-center" id="qty-modal-overlay" onclick="if(event.target===this)document.getElementById('qty-modal-overlay').classList.remove('show')">
-<div class="qty-modal">
-  <div style="font-size:16px;font-weight:700;text-align:center;margin-bottom:4px;" id="qty-modal-title">入庫</div>
-  <div style="font-size:13px;color:var(--text3);text-align:center;" id="qty-modal-product">—</div>
-  <div class="qty-row">
-    <button class="qty-btn" onclick="adjustQty(-1)">−</button>
-    <input class="qty-input" type="number" id="qty-input" value="1" min="1">
-    <button class="qty-btn" onclick="adjustQty(1)">＋</button>
-  </div>
-  <input class="form-input" id="qty-memo" placeholder="メモ（任意）" style="margin-bottom:12px;font-size:15px;">
-  <button class="qty-confirm" id="qty-confirm-btn" onclick="confirmStockIO()">確定</button>
-</div>
-</div>
-
-<!-- ===================== MANUAL ENTRY MODAL ===================== -->
-<div class="modal-overlay modal-overlay-center" id="manual-modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
-<div class="qty-modal">
-  <div style="font-size:16px;font-weight:700;text-align:center;margin-bottom:12px;">手動入力</div>
-  <input class="form-input" id="manual-input" placeholder="バーコード / GTIN / ロット番号" style="font-size:16px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')submitManualEntry()">
-  <button onclick="submitManualEntry()" style="width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:var(--r-sm);font-size:15px;font-weight:700;cursor:pointer;">検索 / 処理</button>
-</div>
-</div>
-
-<!-- HTTPS Guide Panel -->
-<div id="https-guide" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);align-items:center;justify-content:center;padding:20px;">
-  <div style="background:#1a1d27;border:1px solid #2e3248;border-radius:16px;padding:24px;max-width:400px;width:100%;">
-    <div style="font-size:20px;font-weight:700;margin-bottom:4px;">📱 iPhoneで使う方法</div>
-    <div style="font-size:13px;color:#94a3b8;margin-bottom:16px;">カメラを使うにはHTTPS環境が必要です</div>
-    <div style="background:#0f1117;border-radius:10px;padding:16px;margin-bottom:12px;">
-      <div style="font-size:12px;font-weight:700;color:#06b6d4;margin-bottom:8px;">① 推奨：同じWi-Fiで簡単サーバー起動</div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">このHTMLファイルをMacのターミナルで下記を実行</div>
-      <code style="display:block;background:#0d1117;padding:10px;border-radius:6px;font-size:12px;color:#22c55e;word-break:break-all;">cd ~/Downloads<br>python3 -m http.server 8080</code>
-      <div style="font-size:12px;color:#94a3b8;margin-top:8px;">iPhoneブラウザで <code style="color:#3b82f6;">http://（MacのIPアドレス）:8080</code> を開く</div>
-    </div>
-    <div style="background:#0f1117;border-radius:10px;padding:16px;margin-bottom:16px;">
-      <div style="font-size:12px;font-weight:700;color:#06b6d4;margin-bottom:8px;">② 簡単：ngrokで即座にHTTPS化</div>
-      <code style="display:block;background:#0d1117;padding:10px;border-radius:6px;font-size:12px;color:#22c55e;">ngrok http 8080</code>
-      <div style="font-size:12px;color:#94a3b8;margin-top:6px;">表示されたhttps://…URLをiPhoneで開く</div>
-    </div>
-    <div style="background:#1e3a5f;border-radius:8px;padding:10px;font-size:12px;color:#93c5fd;margin-bottom:16px;">
-      💡 現在のPC（このブラウザ）では手動入力ボタン（✏️）でバーコード番号を直接入力できます
-    </div>
-    <button onclick="document.getElementById('https-guide').style.display='none'" style="width:100%;padding:12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">閉じる</button>
-  </div>
-</div>
-
-<div class="toast-wrap" id="toast-wrap"></div>
 
 <script>
-// ================================================================
-//  DATA
-// ================================================================
-let DB = { products: [], history: [] };
-function saveDB() { try { window.__inventoryDB = JSON.parse(JSON.stringify(DB)); } catch(e){} }
-function loadDB() { if(window.__inventoryDB) DB = window.__inventoryDB; }
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+/* -------------------------
+   設定
+------------------------- */
+const SCAN_COOLDOWN_MS = 1200; // 同じコードの連続登録防止
+const MAX_ROWS = 500;         // 履歴上限（必要なら増やす）
 
-// ================================================================
-//  GS1-128 PARSER  (full Application Identifier support)
-// ================================================================
-const AI_DEF = {
-  '00':{label:'SSCC',len:18,fx:true},
-  '01':{label:'GTIN',len:14,fx:true},
-  '02':{label:'GTIN（内容）',len:14,fx:true},
-  '10':{label:'ロット番号',len:20,fx:false},
-  '11':{label:'製造年月日',len:6,fx:true,date:true},
-  '13':{label:'包装年月日',len:6,fx:true,date:true},
-  '15':{label:'賞味期限',len:6,fx:true,date:true},
-  '17':{label:'有効期限',len:6,fx:true,date:true},
-  '20':{label:'バリアント',len:2,fx:true},
-  '21':{label:'製造番号',len:20,fx:false},
-  '22':{label:'製品バリアント',len:20,fx:false},
-  '30':{label:'数量',len:8,fx:false},
-  '37':{label:'物流数量',len:8,fx:false},
-  '240':{label:'追加商品ID',len:30,fx:false},
-  '250':{label:'セカンダリSN',len:30,fx:false},
-  '251':{label:'ソース参照',len:30,fx:false},
-};
-const DATE_AIS = new Set(['11','13','15','17']);
-const FNC1 = '\x1d', FNC1b = '\x1e';
+/* -------------------------
+   GS1 パーサ（よく使うAI：01/17/10）
+   - ]C1 や ]C101 を含む Symbology Identifier を除去
+   - GS(ASCII29) を区切りとして扱う（入っていれば最強）
+   - 区切りが無い場合も、AIの固定長/可変長を使って推定
+------------------------- */
+function normalizeRaw(raw){
+  if(!raw) return "";
+  // 先頭のSymbology Identifier（例：]C1）を除去
+  // Cognex等で ]C101.... のように来ることがある
+  if(raw.startsWith("]C1")) raw = raw.slice(3);
+  if(raw.startsWith("]c1")) raw = raw.slice(3);
+  if(raw.startsWith("]E0")) raw = raw.slice(3); // GS1 DataMatrixなどの可能性
+  if(raw.startsWith("]e0")) raw = raw.slice(3);
+  return raw.trim();
+}
 
-function parseGS1(raw) {
-  if(!raw || raw.length < 4) return null;
-  let s = raw;
-  // Parenthesis format "(01)..." → raw
-  if(s.includes('(')) s = s.replace(/\((\d{2,4})\)/g, '\x1d$1');
-  if(s.startsWith(FNC1) || s.startsWith(FNC1b)) s = s.slice(1);
+function formatYYMMDD(yymmdd){
+  if(!/^\d{6}$/.test(yymmdd)) return "";
+  const yy = parseInt(yymmdd.slice(0,2),10);
+  const mm = yymmdd.slice(2,4);
+  const dd = yymmdd.slice(4,6);
+  const yyyy = 2000 + yy; // ここは運用に合わせて調整可能
+  return `${yyyy}-${mm}-${dd}`;
+}
 
-  const res = {};
+function parseGS1(rawInput){
+  const raw = normalizeRaw(rawInput);
+
+  // GS (ASCII 29) が含まれる場合：可変長AIの区切りが取れる
+  const GS = String.fromCharCode(29);
+
+  // 代表AIのみ対応（必要なら追加）
+  // 01:固定14, 17:固定6, 10:可変(～20)※GS区切り or 終端
+  const out = { gtin:"", exp:"", lot:"" };
+
   let i = 0;
-  while(i < s.length) {
-    while(i < s.length && (s[i]===FNC1 || s[i]===FNC1b)) i++;
-    if(i >= s.length) break;
-    let ai = null;
-    for(const tl of [4,3,2]) {
-      const c = s.substr(i,tl);
-      if(AI_DEF[c]) { ai=c; break; }
+
+  // ()付き表記にも対応（例：(01)....）
+  const s = raw.replace(/\(/g,"").replace(/\)/g,""); // (01)形式を除去して連続にする簡易対応
+
+  while(i < s.length){
+    // GSが来たら飛ばす
+    if(s[i] === GS){ i++; continue; }
+
+    const ai2 = s.slice(i, i+2);
+    const ai3 = s.slice(i, i+3);
+    const ai4 = s.slice(i, i+4);
+
+    if(ai2 === "01"){
+      const v = s.slice(i+2, i+2+14);
+      if(/^\d{14}$/.test(v)) out.gtin = v;
+      i += 2+14;
+      continue;
     }
-    if(!ai) { i++; continue; }
-    i += ai.length;
-    const def = AI_DEF[ai];
-    let val;
-    if(def.fx) { val = s.substr(i, def.len); i += def.len; }
-    else {
-      let end = s.length;
-      for(const sep of [FNC1, FNC1b]) {
-        const idx = s.indexOf(sep, i);
-        if(idx >= 0 && idx < end) end = idx;
+    if(ai2 === "17"){
+      const v = s.slice(i+2, i+2+6);
+      if(/^\d{6}$/.test(v)) out.exp = formatYYMMDD(v);
+      i += 2+6;
+      continue;
+    }
+    if(ai2 === "10"){
+      // 可変：GSがあればそこまで。無ければ最大20文字（現場運用ではLOTが末尾のことが多い）
+      let start = i+2;
+      let end = start;
+
+      // GSが見つかればそこまで
+      const gsPos = s.indexOf(GS, start);
+      if(gsPos !== -1){
+        end = gsPos;
+      } else {
+        end = Math.min(start + 20, s.length);
       }
-      end = Math.min(end, i + def.len);
-      val = s.substr(i, end - i);
+      out.lot = s.slice(start, end);
       i = end;
+      continue;
     }
-    if(val) res[ai] = val;
+
+    // 未対応AI：1文字進める（暴走防止）
+    i++;
   }
-  return Object.keys(res).length ? res : null;
+
+  return out;
 }
 
-function gs1ToISO(yymmdd) {
-  if(!yymmdd || yymmdd.length !== 6) return null;
-  const yy=+yymmdd.slice(0,2), mm=+yymmdd.slice(2,4), dd=+yymmdd.slice(4,6);
-  const yyyy = yy < 50 ? 2000+yy : 1900+yy;
-  const dayStr = dd===0 ? '01' : String(dd).padStart(2,'0');
-  return `${yyyy}-${String(mm).padStart(2,'0')}-${dayStr}`;
-}
+/* -------------------------
+   履歴・CSV
+------------------------- */
+let rows = [];
+let lastSeen = new Map(); // code -> timestamp
 
-function gs1DateFmt(yymmdd) {
-  const iso = gs1ToISO(yymmdd);
-  if(!iso) return yymmdd;
-  const d = new Date(iso);
-  return `${d.getFullYear()}年${d.getMonth()+1}月${+yymmdd.slice(4)===0?'末日':d.getDate()+'日'}`;
-}
+function addRow(raw){
+  const now = new Date();
+  const time = now.toLocaleString();
 
-function daysToExpiry(iso) {
-  if(!iso) return Infinity;
-  return Math.ceil((new Date(iso) - new Date()) / 86400000);
-}
-
-// ================================================================
-//  SCANNER ENGINE
-// ================================================================
-let videoEl, canvasEl, ctx, scanning=false, videoTrack=null, torchOn=false;
-let rafId=null, detector=null, detectorReady=false;
-let lastCode='', lastCodeTime=0, scanDebounce=1500;
-let currentResult=null;
-let animLine=0, animDir=1;
-
-function initScanner() {
-  videoEl = document.getElementById('scanner-video');
-  canvasEl = document.getElementById('scanner-canvas');
-  ctx = canvasEl.getContext('2d');
-  // Resize canvas to match viewport
-  const resizeCanvas = () => {
-    canvasEl.width = canvasEl.offsetWidth;
-    canvasEl.height = canvasEl.offsetHeight;
+  const parsed = parseGS1(raw);
+  const record = {
+    time,
+    gtin: parsed.gtin || "",
+    exp: parsed.exp || "",
+    lot: parsed.lot || "",
+    raw: raw
   };
-  new ResizeObserver(resizeCanvas).observe(canvasEl);
-  resizeCanvas();
-  // Try BarcodeDetector
-  initDetector();
+
+  rows.push(record);
+  if(rows.length > MAX_ROWS) rows.shift();
+
+  renderTable();
 }
 
-async function initDetector() {
-  if('BarcodeDetector' in window) {
-    try {
-      const supported = await BarcodeDetector.getSupportedFormats().catch(()=>null);
-      const formats = supported || ['code_128','ean_13','ean_8','qr_code','data_matrix','pdf417','aztec','itf','code_39','code_93','upc_a','upc_e','codabar'];
-      detector = new BarcodeDetector({ formats });
-      detectorReady = true;
-      document.getElementById('scan-mode-badge').textContent = 'BarcodeDetector API';
-      console.log('✅ BarcodeDetector ready, formats:', formats.length);
-    } catch(e) {
-      console.warn('BarcodeDetector init failed:', e);
-      loadFallback();
-    }
-  } else {
-    loadFallback();
+function renderTable(){
+  const tbody = document.querySelector("#tbl tbody");
+  tbody.innerHTML = "";
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${escapeHtml(r.time)}</td>
+      <td class="mono">${escapeHtml(r.gtin)}</td>
+      <td class="mono">${escapeHtml(r.exp)}</td>
+      <td class="mono">${escapeHtml(r.lot)}</td>
+      <td class="mono">${escapeHtml(r.raw)}</td>
+    `;
+    tbody.appendChild(tr);
   }
 }
 
-function loadFallback() {
-  const s = document.createElement('script');
-  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js';
-  s.onload = () => { detectorReady = true; document.getElementById('scan-mode-badge').textContent = 'ZXing Fallback'; };
-  document.head.appendChild(s);
-}
-
-async function toggleScanner() {
-  if(scanning) await stopScannerEngine();
-  else await startScannerEngine();
-}
-
-async function startScannerEngine() {
-  const btn = document.getElementById('main-scan-btn');
-  const statusEl = document.getElementById('scan-status');
-  statusEl.textContent = 'カメラを起動中...';
-
-  // Check camera API availability
-  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    const proto = location.protocol;
-    let msg = 'カメラAPIが使用できません。';
-    if(proto === 'file:') {
-      msg = '⚠️ ローカルファイルではカメラが使えません。下の手順でHTTPS環境で開いてください。';
-      showHttpsGuide();
-    } else if(proto !== 'https:') {
-      msg = 'カメラにはHTTPS接続が必要です。';
-    }
-    statusEl.textContent = msg;
-    toast(msg, 'error');
-    return;
+function downloadCSV(){
+  let csv = "time,gtin,exp,lot,raw\n";
+  for(const r of rows){
+    csv += [
+      r.time, r.gtin, r.exp, r.lot, r.raw
+    ].map(csvEscape).join(",") + "\n";
   }
-
-  try {
-    // Progressive fallback: most restrictive → least restrictive
-    // NOTE: "advanced" is NOT allowed in getUserMedia — use applyConstraints after stream is obtained
-    const tryList = [
-      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } },
-      { video: { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } },
-      { video: { facingMode: 'environment' } },
-      { video: true }
-    ];
-
-    let stream = null, lastErr = null;
-    for(const c of tryList) {
-      try { stream = await navigator.mediaDevices.getUserMedia(c); break; }
-      catch(e) { lastErr = e; console.warn('getUserMedia failed:', c, e.name, e.message); }
-    }
-
-    if(!stream) {
-      let msg = 'カメラを起動できませんでした';
-      if(lastErr) {
-        if(lastErr.name === 'NotAllowedError' || lastErr.name === 'PermissionDeniedError') {
-          msg = '📵 カメラのアクセスが拒否されました。ブラウザのアドレスバー横のカメラアイコンから許可してください。';
-        } else if(lastErr.name === 'NotFoundError' || lastErr.name === 'DevicesNotFoundError') {
-          msg = '📷 カメラが見つかりません。カメラが接続されているか確認してください。';
-        } else if(lastErr.name === 'NotSupportedError' || lastErr.name === 'TypeError') {
-          msg = '⚠️ このブラウザではカメラが使用できません。ChromeまたはSafariをお試しください。';
-          if(location.protocol === 'file:') { msg += ' ※ローカルファイルはHTTPS環境が必要です。'; showHttpsGuide(); }
-        } else if(lastErr.name === 'OverconstrainedError') {
-          msg = '📷 カメラの設定に問題があります。別のブラウザをお試しください。';
-        } else {
-          msg = 'カメラエラー: ' + lastErr.name + ' — ' + lastErr.message;
-        }
-      }
-      statusEl.textContent = msg;
-      toast('カメラを起動できませんでした', 'error');
-      return;
-    }
-
-    videoEl.srcObject = stream;
-    videoTrack = stream.getVideoTracks()[0];
-    await videoEl.play();
-
-    // Apply advanced constraints AFTER stream is obtained (correct way)
-    if(videoTrack && videoTrack.applyConstraints) {
-      try {
-        await videoTrack.applyConstraints({
-          advanced: [
-            { focusMode: 'continuous' },
-            { exposureMode: 'continuous' },
-            { whiteBalanceMode: 'continuous' }
-          ]
-        });
-      } catch(e) { /* advanced constraints not supported — ignore */ }
-    }
-
-    // Check capabilities
-    const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-    // Torch
-    if(caps.torch) {
-      document.getElementById('torch-btn').style.display = 'flex';
-    }
-    // Zoom
-    if(caps.zoom) {
-      const zoomRow = document.getElementById('zoom-slider-row');
-      const slider = document.getElementById('zoom-slider');
-      zoomRow.style.display = 'flex';
-      slider.min = caps.zoom.min || 1;
-      slider.max = Math.min(caps.zoom.max || 5, 8);
-      slider.step = caps.zoom.step || 0.1;
-      slider.value = 1;
-    }
-
-    scanning = true;
-    btn.classList.add('scanning');
-    document.getElementById('main-btn-icon-start').style.display = 'none';
-    document.getElementById('main-btn-icon-stop').style.display = 'block';
-    statusEl.textContent = 'スキャン中 — バーコードをかざしてください';
-
-    drawOverlay();
-    if(detectorReady && detector) detectLoop();
-    else setTimeout(() => { if(detectorReady) detectLoop(); }, 500);
-
-  } catch(err) {
-    statusEl.textContent = 'カメラエラー: ' + (err.message || err);
-    toast('カメラを起動できませんでした', 'error');
-  }
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `gs1_scan_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
 }
 
-async function stopScannerEngine() {
-  scanning = false;
-  cancelAnimationFrame(rafId);
-  if(videoTrack) { videoTrack.stop(); videoTrack = null; }
-  if(videoEl.srcObject) { videoEl.srcObject.getTracks().forEach(t=>t.stop()); videoEl.srcObject = null; }
-  const btn = document.getElementById('main-scan-btn');
-  btn.classList.remove('scanning');
-  document.getElementById('main-btn-icon-start').style.display = 'block';
-  document.getElementById('main-btn-icon-stop').style.display = 'none';
-  document.getElementById('scan-status').textContent = 'カメラボタンを押してスキャン開始';
-  document.getElementById('zoom-slider-row').style.display = 'none';
-  document.getElementById('torch-btn').style.display = 'none';
-  // Clear canvas
-  if(ctx) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+function csvEscape(v){
+  const s = String(v ?? "");
+  if(/[",\n]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
+  return s;
+}
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-// ── Detection loop (BarcodeDetector) ──
-async function detectLoop() {
-  if(!scanning || !detector) return;
-  try {
-    if(videoEl.readyState >= 2) {
-      const barcodes = await detector.detect(videoEl);
-      if(barcodes.length > 0) {
-        const now = Date.now();
-        const best = barcodes[0];
-        if(best.rawValue !== lastCode || now - lastCodeTime > scanDebounce) {
-          lastCode = best.rawValue;
-          lastCodeTime = now;
-          onDetected(best.rawValue, best.format);
-        }
-      }
-    }
-  } catch(e) {}
-  rafId = requestAnimationFrame(detectLoop);
-}
+/* -------------------------
+   カメラ・スキャン（ZXing）
+------------------------- */
+const statusEl = document.getElementById("status");
+const btnStart = document.getElementById("btnStart");
+const btnStop  = document.getElementById("btnStop");
+const btnTorch = document.getElementById("btnTorch");
+const camSel   = document.getElementById("cameraSelect");
 
-// ── Canvas overlay drawing ──
-function drawOverlay() {
-  if(!scanning) return;
-  const w = canvasEl.width, h = canvasEl.height;
-  ctx.clearRect(0,0,w,h);
+const videoEl  = document.getElementById("video");
+const manualEl = document.getElementById("manual");
 
-  // Scan zone
-  const sw = Math.min(w*0.88, 600);
-  const sh = sw * 0.38;
-  const sx = (w-sw)/2, sy = (h-sh)/2 - 20;
+let codeReader = null;
+let currentTrack = null;
+let torchOn = false;
+let decoding = false;
 
-  // Dark overlay
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fillRect(0,0,w,h);
-  ctx.clearRect(sx,sy,sw,sh);
+function setStatus(t){ statusEl.textContent = t; }
 
-  // Animated scan line
-  animLine += animDir * 1.5;
-  if(animLine > sh-2) animDir = -1;
-  if(animLine < 2) animDir = 1;
-  const grad = ctx.createLinearGradient(sx, sy+animLine-6, sx, sy+animLine+6);
-  grad.addColorStop(0,'rgba(59,130,246,0)');
-  grad.addColorStop(0.5,'rgba(59,130,246,0.9)');
-  grad.addColorStop(1,'rgba(59,130,246,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(sx+2, sy+animLine-6, sw-4, 12);
-
-  // Corner brackets
-  const cl = 22, ct = 3;
-  ctx.strokeStyle = '#3b82f6';
-  ctx.lineWidth = ct;
-  ctx.lineCap = 'round';
-  const corners = [[sx,sy],[sx+sw,sy],[sx,sy+sh],[sx+sw,sy+sh]];
-  const dirs = [[1,1],[-1,1],[1,-1],[-1,-1]];
-  corners.forEach(([cx,cy],[dx,dy])=>{
-    ctx.beginPath(); ctx.moveTo(cx+dx*cl,cy); ctx.lineTo(cx,cy); ctx.lineTo(cx,cy+dy*cl); ctx.stroke();
+async function listCameras(){
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cams = devices.filter(d => d.kind === "videoinput");
+  camSel.innerHTML = "";
+  cams.forEach((c, idx) => {
+    const opt = document.createElement("option");
+    opt.value = c.deviceId;
+    opt.textContent = c.label || `カメラ${idx+1}`;
+    camSel.appendChild(opt);
   });
 
-  // Border glow
-  ctx.strokeStyle = 'rgba(59,130,246,0.3)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(sx,sy,sw,sh);
-
-  rafId = requestAnimationFrame(drawOverlay);
+  // iPhoneは背面カメラが最後に来ることがあるので label に "back" 等があれば優先
+  const preferred = cams.find(c => /back|rear|environment/i.test(c.label));
+  if(preferred) camSel.value = preferred.deviceId;
 }
 
-// ── Flash success ──
-function flashSuccess() {
-  const overlay = document.createElement('div');
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(34,197,94,0.25);z-index:300;pointer-events:none;animation:flashAnim 0.4s ease forwards;';
-  const style = document.createElement('style');
-  style.textContent = '@keyframes flashAnim{0%{opacity:1}100%{opacity:0}}';
-  document.head.appendChild(style);
-  document.body.appendChild(overlay);
-  setTimeout(()=>overlay.remove(), 400);
-}
+async function startCamera(){
+  if(!window.ZXing) { alert("ZXingライブラリの読み込みに失敗しました"); return; }
 
-// ── Zoom & Torch ──
-async function applyZoom(val) {
-  document.getElementById('zoom-label').textContent = '×'+parseFloat(val).toFixed(1);
-  if(videoTrack) {
-    const caps = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-    if(caps.zoom) { try { await videoTrack.applyConstraints({advanced:[{zoom:parseFloat(val)}]}); } catch(e){} }
-  }
-}
-
-async function toggleTorch() {
-  if(!videoTrack) return;
-  try {
-    torchOn = !torchOn;
-    await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-    document.getElementById('torch-btn').classList.toggle('active', torchOn);
-  } catch(e) { toast('フラッシュ非対応', 'error'); torchOn = false; }
-}
-
-// ── On detection ──
-function onDetected(raw, format) {
-  if(navigator.vibrate) navigator.vibrate([30]);
-  playBeep();
-  flashSuccess();
-
-  const gs1 = parseGS1(raw);
-  currentResult = { raw, gs1, format };
-  showResultPanel(raw, gs1, format);
-}
-
-// ── Beep ──
-function playBeep() {
-  try {
-    const ac = new (window.AudioContext||window.webkitAudioContext)();
-    const osc = ac.createOscillator();
-    const gain = ac.createGain();
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.type = 'sine'; osc.frequency.value = 1200;
-    gain.gain.setValueAtTime(0.15, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.12);
-    osc.start(ac.currentTime); osc.stop(ac.currentTime + 0.12);
-  } catch(e) {}
-}
-
-// ── Result panel ──
-function showResultPanel(raw, gs1, format) {
-  // Find product
-  const product = findProduct(raw, gs1);
-
-  // Icon & name
-  const iconEl = document.getElementById('result-icon');
-  const nameEl = document.getElementById('result-name');
-  const rawEl = document.getElementById('result-raw');
-  const addBtn = document.getElementById('action-add-btn');
-
-  if(product) {
-    iconEl.className = 'result-icon found';
-    iconEl.textContent = '✅';
-    nameEl.textContent = product.name;
-    const days = daysToExpiry(product.expiry);
-    const expStr = product.expiry ? (days<0?' 🔴期限切れ':days<=30?' 🟡'+days+'日':' ✅'+new Date(product.expiry).toLocaleDateString('ja-JP')) : '';
-    rawEl.textContent = (product.gtin||product.barcode) + ' | 在庫:'+product.stock + expStr;
-    addBtn.style.display = 'none';
-  } else {
-    iconEl.className = 'result-icon new';
-    iconEl.textContent = '⚡';
-    nameEl.textContent = '未登録の物品';
-    rawEl.textContent = raw.length > 60 ? raw.slice(0,60)+'…' : raw;
-    addBtn.style.display = '';
-  }
-
-  // GS1 fields
-  const gs1Panel = document.getElementById('gs1-panel');
-  if(gs1 && Object.keys(gs1).length) {
-    const fields = Object.entries(gs1).map(([ai, val]) => {
-      const def = AI_DEF[ai] || { label:'AI('+ai+')' };
-      let dispVal = val;
-      let cls = '';
-      if(DATE_AIS.has(ai)) {
-        dispVal = gs1DateFmt(val);
-        if(ai==='17'||ai==='15') {
-          const iso = gs1ToISO(val);
-          const d = daysToExpiry(iso);
-          cls = d<0?'expiry-exp':d<=30?'expiry-warn':'expiry-ok';
-        }
-      }
-      const fw = (ai==='10'||ai==='21') ? ' full-width' : '';
-      return `<div class="gs1-field${fw}"><div class="gs1-field-label">AI(${ai}) ${def.label}</div><div class="gs1-field-value ${cls}">${esc(dispVal)}</div></div>`;
-    }).join('');
-    gs1Panel.innerHTML = `<div class="gs1-section"><div class="gs1-section-title">🔍 GS1 デコード結果</div><div class="gs1-fields">${fields}</div></div>`;
-  } else {
-    const fmtLabel = format ? `フォーマット: ${format}` : '';
-    gs1Panel.innerHTML = `<div class="gs1-section" style="font-size:13px;color:var(--text3);">${fmtLabel || 'GS1 Application Identifierなし'}</div>`;
-  }
-
-  document.getElementById('scan-result-panel').classList.add('show');
-}
-
-function closeResultPanel() {
-  document.getElementById('scan-result-panel').classList.remove('show');
-}
-
-// ── Find product ──
-function findProduct(raw, gs1) {
-  let p = DB.products.find(x=>x.barcode===raw);
-  if(!p && gs1) {
-    if(gs1['01']) p = DB.products.find(x=>x.gtin===gs1['01']);
-    if(!p && gs1['10']) p = DB.products.find(x=>x.lot===gs1['10']);
-  }
-  return p || null;
-}
-
-// ── Quick actions ──
-let pendingIOType = 'in', pendingProduct = null;
-
-function quickStockIO(type) {
-  const product = currentResult ? findProduct(currentResult.raw, currentResult.gs1) : null;
-  if(!product) { toast('先に物品を登録してください', 'error'); return; }
-  closeResultPanel();
-  openQtyModal(type, product);
-}
-
-function openQtyModal(type, product) {
-  pendingIOType = type;
-  pendingProduct = product;
-  document.getElementById('qty-modal-title').textContent = type==='in'?'📥 入庫':'📤 出庫';
-  document.getElementById('qty-modal-product').textContent = product.name + '（在庫: '+product.stock+'）';
-  document.getElementById('qty-input').value = 1;
-  document.getElementById('qty-memo').value = '';
-  const btn = document.getElementById('qty-confirm-btn');
-  btn.className = 'qty-confirm '+ type;
-  btn.textContent = type==='in'?'入庫する':'出庫する';
-  document.getElementById('qty-modal-overlay').classList.add('show');
-}
-
-function adjustQty(delta) {
-  const el = document.getElementById('qty-input');
-  el.value = Math.max(1, parseInt(el.value||1) + delta);
-}
-
-function confirmStockIO() {
-  const qty = parseInt(document.getElementById('qty-input').value)||0;
-  const memo = document.getElementById('qty-memo').value.trim();
-  if(!pendingProduct || qty<=0) return;
-  const p = DB.products.find(x=>x.id===pendingProduct.id);
-  if(!p) return;
-  if(pendingIOType==='out' && p.stock < qty) { toast('在庫不足（現在:'+p.stock+'）','error'); return; }
-  p.stock += pendingIOType==='in' ? qty : -qty;
-  p.updatedAt = new Date().toISOString();
-  DB.history.unshift({ id:uid(), barcode:p.barcode, name:p.name, lot:p.lot||'', type:pendingIOType, qty, stockAfter:p.stock, memo, date:new Date().toISOString() });
-  saveDB();
-  document.getElementById('qty-modal-overlay').classList.remove('show');
-  toast((pendingIOType==='in'?'入庫':'出庫')+'完了: '+p.name+' ×'+qty, 'success');
-  renderInventory();
-}
-
-function quickRegister() {
-  closeResultPanel();
-  openProductModal(null, currentResult);
-}
-
-// ── Manual entry ──
-function openManualEntry() {
-  document.getElementById('manual-input').value = '';
-  document.getElementById('manual-modal-overlay').classList.add('show');
-  setTimeout(()=>document.getElementById('manual-input').focus(), 300);
-}
-
-function submitManualEntry() {
-  const val = document.getElementById('manual-input').value.trim();
-  document.getElementById('manual-modal-overlay').classList.remove('show');
-  if(!val) return;
-  const gs1 = parseGS1(val);
-  currentResult = { raw:val, gs1, format:'manual' };
-  onDetected(val, 'manual');
-}
-
-// ================================================================
-//  INVENTORY
-// ================================================================
-function renderInventory() {
-  const q = document.getElementById('search-input').value.toLowerCase();
-  let list = DB.products.filter(p =>
-    !q || p.name.toLowerCase().includes(q) || p.barcode.includes(q) ||
-    (p.gtin||'').includes(q) || (p.lot||'').toLowerCase().includes(q)
-  );
-
-  const el = document.getElementById('inventory-list');
-  if(!list.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📦</div><div>物品がありません</div><div style="font-size:13px;margin-top:8px;">スキャンして物品を登録してください</div></div>`;
+  if(!navigator.mediaDevices?.getUserMedia){
+    alert("このブラウザはカメラに対応していません");
     return;
   }
 
-  el.innerHTML = list.map(p => {
-    const stockCls = p.stock===0?'zero':p.stock<=p.threshold?'low':'ok';
-    const days = daysToExpiry(p.expiry);
-    let expiryChip = '';
-    if(p.expiry) {
-      const cls = days<0?'exp':days<=30?'warn':'ok';
-      const label = days<0?'期限切れ':days<=30?'残'+days+'日':new Date(p.expiry).toLocaleDateString('ja-JP');
-      expiryChip = `<span class="expiry-chip ${cls}">${label}</span>`;
-    }
-    return `<div class="product-card" onclick="openProductModal('${p.id}')">
-      <div class="product-card-icon">${catIcon(p.category)}</div>
-      <div class="product-card-body">
-        <div class="product-card-name">${esc(p.name)}</div>
-        <div class="product-card-meta">${esc(p.gtin||p.barcode)}${p.lot?' | '+p.lot:''}</div>
-        ${expiryChip}
-      </div>
-      <div class="product-card-right">
-        <div class="stock-num ${stockCls}">${p.stock}</div>
-        <div class="stock-label">在庫</div>
-        <div style="margin-top:4px;display:flex;gap:4px;">
-          <button onclick="event.stopPropagation();openQtyModal('in',DB.products.find(x=>x.id==='${p.id}'))" style="padding:4px 8px;background:#14532d;color:#86efac;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">＋</button>
-          <button onclick="event.stopPropagation();openQtyModal('out',DB.products.find(x=>x.id==='${p.id}'))" style="padding:4px 8px;background:#450a0a;color:#fca5a5;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">−</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
-}
+  if(codeReader) await stopCamera();
 
-function catIcon(cat) {
-  const m = {'注射薬':'💉','内服薬':'💊','外用薬':'🧴','医療材料':'🩺','衛生材料':'🧤','医療機器':'🔬','その他':'📦'};
-  return m[cat] || '📦';
-}
+  codeReader = new ZXing.BrowserMultiFormatReader();
 
-// ================================================================
-//  PRODUCT MODAL
-// ================================================================
-function openProductModal(id, scanResult) {
-  document.getElementById('product-modal-title').textContent = id ? '物品編集' : '新規物品登録';
-  document.getElementById('pm-id').value = id || '';
-  document.getElementById('gs1-autofill-banner').style.display = 'none';
-  ['pm-barcode','pm-name','pm-gtin','pm-lot','pm-expiry','pm-serial'].forEach(f=>document.getElementById(f).value='');
-  document.getElementById('pm-stock').value = 0;
-  document.getElementById('pm-threshold').value = 10;
-  document.getElementById('pm-price').value = 0;
+  const deviceId = camSel.value || null;
+  setStatus("カメラ起動中…");
 
-  if(id) {
-    const p = DB.products.find(x=>x.id===id);
-    if(p) {
-      document.getElementById('pm-barcode').value = p.barcode||'';
-      document.getElementById('pm-name').value = p.name||'';
-      document.getElementById('pm-gtin').value = p.gtin||'';
-      document.getElementById('pm-lot').value = p.lot||'';
-      document.getElementById('pm-expiry').value = p.expiry||'';
-      document.getElementById('pm-serial').value = p.serial||'';
-      document.getElementById('pm-stock').value = p.stock||0;
-      document.getElementById('pm-threshold').value = p.threshold||10;
-      document.getElementById('pm-price').value = p.price||0;
-      document.getElementById('pm-category').value = p.category||'その他';
+  decoding = true;
+
+  // decodeFromVideoDevice は内部で getUserMedia を呼びます
+  codeReader.decodeFromVideoDevice(deviceId, videoEl, (result, err) => {
+    if(!decoding) return;
+
+    if(result){
+      const raw = result.getText ? result.getText() : result.text;
+      if(!raw) return;
+
+      // クールダウン（同じコードを連続で拾わない）
+      const now = Date.now();
+      const last = lastSeen.get(raw) || 0;
+      if(now - last < SCAN_COOLDOWN_MS) return;
+      lastSeen.set(raw, now);
+
+      // 触覚フィードバック
+      if(navigator.vibrate) navigator.vibrate(30);
+
+      addRow(raw);
+      setStatus("読み取りOK");
     }
-  } else if(scanResult) {
-    document.getElementById('pm-barcode').value = scanResult.raw||'';
-    if(scanResult.gs1) {
-      const g = scanResult.gs1;
-      if(g['01']) document.getElementById('pm-gtin').value = g['01'];
-      if(g['10']) document.getElementById('pm-lot').value = g['10'];
-      if(g['21']) document.getElementById('pm-serial').value = g['21'];
-      const expAI = g['17']||g['15'];
-      if(expAI) document.getElementById('pm-expiry').value = gs1ToISO(expAI)||'';
-      document.getElementById('gs1-autofill-banner').style.display = 'flex';
+  });
+
+  // トーチ制御のため track を取得
+  try{
+    const stream = videoEl.srcObject;
+    if(stream){
+      currentTrack = stream.getVideoTracks()[0] || null;
+      btnTorch.disabled = !currentTrack;
     }
+  }catch(e){
+    btnTorch.disabled = true;
   }
-  document.getElementById('product-modal-overlay').classList.add('show');
+
+  btnStart.disabled = true;
+  btnStop.disabled  = false;
+  setStatus("スキャン中");
 }
 
-function closeProductModal() { document.getElementById('product-modal-overlay').classList.remove('show'); }
+async function stopCamera(){
+  decoding = false;
 
-function saveProduct() {
-  const id = document.getElementById('pm-id').value;
-  const barcode = document.getElementById('pm-barcode').value.trim();
-  const name = document.getElementById('pm-name').value.trim();
-  if(!barcode||!name) { toast('バーコードと物品名は必須です','error'); return; }
-  const dup = DB.products.find(p=>p.barcode===barcode && p.id!==id);
-  if(dup) { toast('このバーコードは登録済みです','error'); return; }
+  try{
+    if(codeReader){
+      codeReader.reset();
+      codeReader = null;
+    }
+  }catch(e){}
 
-  const fields = {
-    barcode, name,
-    gtin: document.getElementById('pm-gtin').value.trim(),
-    lot: document.getElementById('pm-lot').value.trim(),
-    serial: document.getElementById('pm-serial').value.trim(),
-    expiry: document.getElementById('pm-expiry').value,
-    stock: parseInt(document.getElementById('pm-stock').value)||0,
-    threshold: parseInt(document.getElementById('pm-threshold').value)||10,
-    price: parseInt(document.getElementById('pm-price').value)||0,
-    category: document.getElementById('pm-category').value,
-    updatedAt: new Date().toISOString()
-  };
+  try{
+    const stream = videoEl.srcObject;
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+    }
+    videoEl.srcObject = null;
+  }catch(e){}
 
-  if(id) {
-    const p = DB.products.find(x=>x.id===id);
-    if(p) { const old=p.stock; Object.assign(p,fields); if(old!==fields.stock) DB.history.unshift({id:uid(),barcode,name,lot:fields.lot,type:fields.stock>old?'in':'out',qty:Math.abs(fields.stock-old),stockAfter:fields.stock,memo:'直接編集',date:new Date().toISOString()}); }
-    toast('更新しました');
-  } else {
-    DB.products.unshift({id:uid(),...fields,createdAt:new Date().toISOString()});
-    if(fields.stock>0) DB.history.unshift({id:uid(),barcode,name,lot:fields.lot,type:'in',qty:fields.stock,stockAfter:fields.stock,memo:'初期登録',date:new Date().toISOString()});
-    toast('登録しました','success');
-  }
-  saveDB(); closeProductModal(); renderInventory();
+  currentTrack = null;
+  torchOn = false;
+  btnTorch.textContent = "ライト(トーチ)";
+  btnTorch.disabled = true;
+
+  btnStart.disabled = false;
+  btnStop.disabled  = true;
+  setStatus("停止中");
 }
 
-// ================================================================
-//  HISTORY
-// ================================================================
-function renderHistory() {
-  const el = document.getElementById('history-list');
-  if(!DB.history.length) {
-    el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div>履歴がありません</div></div>';
+async function toggleTorch(){
+  if(!currentTrack) return;
+  const caps = currentTrack.getCapabilities?.();
+  if(!caps || !caps.torch){
+    alert("この端末/ブラウザではトーチに対応していません");
     return;
   }
-  el.innerHTML = DB.history.slice(0,100).map(h => {
-    const d = new Date(h.date);
-    return `<div class="history-item">
-      <div class="history-badge ${h.type}">${h.type==='in'?'↑':'↓'}</div>
-      <div style="flex:1;min-width:0;">
-        <div class="history-name">${esc(h.name)}</div>
-        <div class="history-meta">${d.toLocaleDateString('ja-JP')} ${d.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}${h.lot?' | Lot:'+h.lot:''}${h.memo?' | '+h.memo:''}</div>
-      </div>
-      <div class="history-qty ${h.type}">${h.type==='in'?'+':'-'}${h.qty}</div>
-    </div>`;
-  }).join('');
+  torchOn = !torchOn;
+  await currentTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+  btnTorch.textContent = torchOn ? "ライトOFF" : "ライト(トーチ)";
 }
 
-function exportHistoryCSV() {
-  const hdr = '日時,種別,バーコード,物品名,ロット,数量,在庫\n';
-  const rows = DB.history.map(h=>[h.date,h.type==='in'?'入庫':'出庫',h.barcode,h.name,h.lot||'',h.qty,h.stockAfter].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(',')).join('\n');
-  const blob = new Blob(['\ufeff'+hdr+rows],{type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='history_'+new Date().toISOString().slice(0,10)+'.csv'; a.click(); URL.revokeObjectURL(url);
-  toast('CSV出力しました');
-}
+/* -------------------------
+   イベント
+------------------------- */
+btnStart.addEventListener("click", async ()=>{
+  try{
+    // iOSで label を出すために一度許可を取るのがコツ
+    await navigator.mediaDevices.getUserMedia({ video:true });
+    await listCameras();
+    await startCamera();
+  }catch(e){
+    alert("カメラ許可が必要です（HTTPSで開いてください）");
+    setStatus("カメラ起動失敗");
+  }
+});
 
-// ================================================================
-//  NAVIGATION
-// ================================================================
-function switchPage(name, el) {
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
-  if(el) el.classList.add('active');
-  closeResultPanel();
-  if(name==='inventory') renderInventory();
-  if(name==='history') renderHistory();
-  if(name!=='scanner') stopScannerEngine();
-}
+btnStop.addEventListener("click", stopCamera);
+btnTorch.addEventListener("click", toggleTorch);
 
-// ================================================================
-//  TOAST
-// ================================================================
-function toast(msg, type='success') {
-  const c = document.getElementById('toast-wrap');
-  const d = document.createElement('div');
-  d.className = 'toast ' + type;
-  d.textContent = msg;
-  c.appendChild(d);
-  setTimeout(()=>d.remove(), 2800);
-}
+document.getElementById("btnCsv").addEventListener("click", downloadCSV);
+document.getElementById("btnClear").addEventListener("click", ()=>{
+  rows = [];
+  lastSeen.clear();
+  renderTable();
+  setStatus("履歴クリア");
+});
 
-function esc(s){const d=document.createElement('div');d.textContent=String(s||'');return d.innerHTML;}
-function showHttpsGuide(){document.getElementById('https-guide').style.display='flex';}
+document.getElementById("btnManual").addEventListener("click", ()=>{
+  const v = manualEl.value.trim();
+  if(!v) return;
+  addRow(v);
+  manualEl.value = "";
+  setStatus("手入力を追加");
+});
 
-// ================================================================
-//  INIT
-// ================================================================
-loadDB();
-initScanner();
-
-// Swipe down to close result panel
-let touchStartY = 0;
-document.getElementById('scan-result-panel').addEventListener('touchstart', e=>{ touchStartY=e.touches[0].clientY; },{passive:true});
-document.getElementById('scan-result-panel').addEventListener('touchmove', e=>{
-  const dy = e.touches[0].clientY - touchStartY;
-  if(dy > 60) closeResultPanel();
-},{passive:true});
+// 初期化
+(async ()=>{
+  try{
+    if(navigator.mediaDevices?.enumerateDevices){
+      await listCameras();
+    }
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
