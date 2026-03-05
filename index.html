@@ -1,789 +1,1688 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <title>在庫スキャナ</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Laboratory Inventory Management System">
+    <meta name="theme-color" content="#1555c8">
+    <title>在庫管理システム</title>
 
-  <!-- 1D (GS1-128 / Code128) -->
-  <script src="https://unpkg.com/@ericblade/quagga2@1.7.3/dist/quagga.js"></script>
-  <!-- 2D (QR / GS1 DataMatrix) バージョン固定で API 安定性を確保 -->
-  <script src="https://unpkg.com/@zxing/library@0.19.3/umd/index.min.js"></script>
+    <style>
+        :root {
+            --primary: #1555c8;
+            --primary-dark: #0e429e;
+            --primary-light: #eaf0fd;
+            --secondary: #576778;
+            --border: #d8e2ee;
+            --bg: #f0f4f9;
+            --surface: #ffffff;
+            --surface2: #f7f9fc;
+            --text: #18222e;
+            --text2: #576778;
+            --green: #0a9e6c;
+            --green-bg: #e5f7ef;
+            --amber: #b86d00;
+            --amber-bg: #fef3d0;
+            --red: #c72020;
+            --red-bg: #fde8e8;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --shadow: 0 1px 6px rgba(0,0,0,0.08);
+        }
 
-  <style>
-    /* ── Design tokens ── */
-    :root {
-      --primary:       #1555c8;
-      --primary-dark:  #0e429e;
-      --primary-light: #eaf0fd;
-      --bg:            #f0f4f9;
-      --surface:       #ffffff;
-      --surface2:      #f7f9fc;
-      --border:        #d8e2ee;
-      --text:          #18222e;
-      --text2:         #576778;
-      --green:         #0a9e6c;
-      --green-bg:      #e5f7ef;
-      --amber:         #b86d00;
-      --amber-bg:      #fef3d0;
-      --red:           #c72020;
-      --red-bg:        #fde8e8;
-      --r:             14px;
-      --r-sm:          10px;
-      --shadow:        0 1px 6px rgba(0,0,0,0.08);
-    }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
-                   "Noto Sans JP", "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100dvh;
-    }
+        body {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            padding-bottom: 70px;
+        }
 
-    /* ── Header ── */
-    header {
-      background: var(--primary);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 16px;
-      padding-top: max(12px, env(safe-area-inset-top));
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      box-shadow: 0 2px 12px rgba(0,0,0,0.22);
-    }
-    .hdr-icon {
-      width: 40px; height: 40px;
-      background: rgba(255,255,255,0.18);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; flex-shrink: 0;
-    }
-    header h1   { font-size: 17px; font-weight: 700; line-height: 1.2; }
-    header .sub { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+        .app-header {
+            background: var(--primary);
+            color: var(--surface);
+            padding: 12px 16px;
+            box-shadow: var(--shadow);
+            text-align: center;
+            flex-shrink: 0;
+        }
 
-    /* ── Layout ── */
-    .page  { padding: 16px; max-width: 1140px; margin: 0 auto; }
-    .grid  { display: grid; gap: 16px; }
-    @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+        .app-header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin: 0;
+        }
 
-    /* ── Card ── */
-    .card {
-      background: var(--surface);
-      border-radius: var(--r);
-      border: 1px solid var(--border);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    .card-hdr {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 16px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      font-size: 14px; font-weight: 700;
-    }
-    .card-hdr .ml { margin-left: auto; display: flex; gap: 8px; }
+        .app-container {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            -webkit-overflow-scrolling: touch;
+        }
 
-    /* ── Camera viewport ── */
-    #viewport {
-      position: relative;
-      background: #0a0a0a;
-      overflow: hidden;
-      aspect-ratio: 3/4;
-    }
-    @media (min-width: 860px) { #viewport { aspect-ratio: 4/3; } }
+        .tab-content {
+            display: none;
+            padding: 16px;
+            flex: 1;
+            overflow-y: auto;
+        }
 
-    video {
-      width: 100%; height: 100%;
-      display: block;
-      object-fit: cover;
-      background: #000;
-    }
-    canvas#overlay {
-      position: absolute; inset: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-    }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
 
-    /* Scan-frame brackets */
-    .sf {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 80%; height: 26%;
-      pointer-events: none;
-      /* dim area outside */
-      box-shadow: 0 0 0 9999px rgba(0,0,0,0.38);
-      border-radius: 4px;
-    }
-    .sf::before, .sf::after,
-    .sf-b::before, .sf-b::after {
-      content: ''; position: absolute;
-      width: 24px; height: 24px;
-      border-color: #34d399; border-style: solid;
-    }
-    .sf::before  { top:-2px;    left:-2px;  border-width: 3px 0 0 3px; border-radius: 5px 0 0 0; }
-    .sf::after   { top:-2px;    right:-2px; border-width: 3px 3px 0 0; border-radius: 0 5px 0 0; }
-    .sf-b::before { bottom:-2px; left:-2px;  border-width: 0 0 3px 3px; border-radius: 0 0 0 5px; }
-    .sf-b::after  { bottom:-2px; right:-2px; border-width: 0 3px 3px 0; border-radius: 0 0 5px 0; }
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-around;
+            height: 70px;
+            z-index: 100;
+            box-shadow: var(--shadow);
+        }
 
-    /* Animated scan line */
-    .scan-line {
-      position: absolute;
-      left: 4px; right: 4px; height: 2px;
-      background: linear-gradient(90deg, transparent, #34d399 30%, #34d399 70%, transparent);
-      animation: scanAnim 2s linear infinite;
-    }
-    @keyframes scanAnim {
-      0%   { top: 8%;  opacity: 0; }
-      8%   {           opacity: 1; }
-      92%  {           opacity: 1; }
-      100% { top: 92%; opacity: 0; }
-    }
+        .nav-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            cursor: pointer;
+            color: var(--text2);
+            border: none;
+            background: none;
+            transition: all 0.3s ease;
+        }
 
-    /* Camera status bar */
-    .cam-bar {
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      padding: 10px 14px;
-      background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
-      display: flex; align-items: center; gap: 8px;
-    }
-    .dot {
-      width: 9px; height: 9px; border-radius: 50%;
-      background: #666; flex-shrink: 0;
-      transition: background .3s, box-shadow .3s;
-    }
-    .dot.scanning {
-      background: #4ade80;
-      box-shadow: 0 0 7px #4ade80;
-      animation: blink 1.5s infinite;
-    }
-    .dot.error { background: #f87171; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
-    #statusText { color: #fff; font-size: 13px; font-weight: 500; }
+        .nav-item.active {
+            color: var(--primary);
+            border-top: 3px solid var(--primary);
+            margin-top: -1px;
+        }
 
-    /* ── Controls ── */
-    .controls { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
-    .row      { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .nav-icon {
+            font-size: 24px;
+            margin-bottom: 2px;
+        }
 
-    button {
-      border: none; border-radius: var(--r-sm);
-      padding: 9px 15px;
-      font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: .12s;
-      display: inline-flex; align-items: center; gap: 5px;
-      white-space: nowrap;
-    }
-    button:disabled { opacity: .48; cursor: not-allowed; }
-    .btn-p { background: var(--primary); color: #fff; }
-    .btn-p:not(:disabled):active { background: var(--primary-dark); }
-    .btn-s { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-    .btn-s:not(:disabled):active { background: var(--border); }
-    .btn-g { background: var(--green-bg); color: var(--green); border: 1px solid #86efac; }
-    .btn-d { background: var(--red-bg);   color: var(--red);   border: 1px solid #fca5a5; }
+        .card {
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+        }
 
-    .fl { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; display: block; }
-    select, input[type=text] {
-      width: 100%; padding: 9px 11px;
-      border: 1px solid var(--border); border-radius: var(--r-sm);
-      background: var(--surface); color: var(--text);
-      font-size: 13px; outline: none;
-    }
-    select:focus, input[type=text]:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 3px var(--primary-light);
-    }
-    input[type=range] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
 
-    /* ── Last-scan result box ── */
-    #resultBox {
-      margin: 0 16px 14px;
-      padding: 10px 13px;
-      background: var(--green-bg);
-      border: 1px solid #6ee7b7;
-      border-radius: var(--r-sm);
-      display: none;
-    }
-    #resultBox.show { display: block; }
-    .res-head { font-size: 11px; font-weight: 700; color: var(--green); margin-bottom: 7px; }
-    .res-grid {
-      display: grid;
-      grid-template-columns: 84px 1fr;
-      gap: 3px 8px;
-      font-size: 12px;
-    }
-    .res-k { color: var(--text2); font-weight: 600; display: flex; align-items: center; }
-    .res-v { font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
 
-    /* ── Hint box ── */
-    .hint {
-      background: var(--amber-bg);
-      border: 1px solid #fde68a;
-      border-radius: var(--r-sm);
-      padding: 10px 12px;
-      font-size: 12px; color: var(--amber); line-height: 1.7;
-    }
-    .hint strong { color: #7c4e00; }
+        .summary-card {
+            background: linear-gradient(135deg, var(--primary-light) 0%, var(--surface) 100%);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            text-align: center;
+        }
 
-    /* ── History table ── */
-    .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th {
-      background: var(--surface2);
-      color: var(--text2); font-weight: 700;
-      text-align: left;
-      padding: 9px 8px;
-      border-bottom: 2px solid var(--border);
-      white-space: nowrap;
-    }
-    td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    tr:last-child td { border-bottom: none; }
-    tr:nth-child(even) td { background: var(--surface2); }
-    .mono { font-family: ui-monospace, Menlo, monospace; }
+        .summary-card.warning {
+            background: linear-gradient(135deg, var(--amber-bg) 0%, var(--surface) 100%);
+        }
 
-    /* Empty state */
-    .empty { text-align: center; padding: 40px 0; color: var(--text2); font-size: 13px; }
-    .empty .ei { font-size: 38px; margin-bottom: 10px; }
+        .summary-card.danger {
+            background: linear-gradient(135deg, var(--red-bg) 0%, var(--surface) 100%);
+        }
 
-    #debug { font-size: 11px; color: var(--red); min-height: 0; }
-  </style>
+        .summary-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 4px;
+        }
+
+        .summary-card.warning .summary-value {
+            color: var(--amber);
+        }
+
+        .summary-card.danger .summary-value {
+            color: var(--red);
+        }
+
+        .summary-label {
+            font-size: 12px;
+            color: var(--text2);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 12px 16px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+            font-family: inherit;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--surface);
+        }
+
+        .btn-primary:active {
+            background-color: var(--primary-dark);
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary);
+            color: var(--surface);
+        }
+
+        .btn-success {
+            background-color: var(--green);
+            color: var(--surface);
+        }
+
+        .btn-danger {
+            background-color: var(--red);
+            color: var(--surface);
+        }
+
+        .btn-block {
+            display: block;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+            color: var(--text);
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .search-box {
+            position: relative;
+            margin-bottom: 16px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text2);
+            font-size: 16px;
+        }
+
+        .form-input.search-input {
+            padding-left: 36px;
+        }
+
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .filter-btn {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .filter-btn.active {
+            background: var(--primary);
+            color: var(--surface);
+            border-color: var(--primary);
+        }
+
+        .item-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .item-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .item-card:active {
+            background: var(--primary-light);
+        }
+
+        .item-info {
+            flex: 1;
+        }
+
+        .item-name {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        .item-detail {
+            font-size: 12px;
+            color: var(--text2);
+            margin-bottom: 4px;
+        }
+
+        .item-stock {
+            text-align: right;
+            margin-left: 8px;
+        }
+
+        .stock-number {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .item-card.stock-low .stock-number {
+            color: var(--red);
+        }
+
+        .item-card.stock-warning .stock-number {
+            color: var(--amber);
+        }
+
+        .expiry-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .expiry-status.expired {
+            background: var(--red-bg);
+            color: var(--red);
+        }
+
+        .expiry-status.expiring-soon {
+            background: var(--amber-bg);
+            color: var(--amber);
+        }
+
+        .expiry-status.warning {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .expiry-status.ok {
+            background: var(--green-bg);
+            color: var(--green);
+        }
+
+        .activity-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .activity-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            border-left: 4px solid var(--primary);
+        }
+
+        .activity-item.out {
+            border-left-color: var(--red);
+        }
+
+        .activity-icon {
+            font-size: 24px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--primary-light);
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .activity-item.out .activity-icon {
+            background: var(--red-bg);
+        }
+
+        .activity-title {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .activity-detail {
+            font-size: 11px;
+            color: var(--text2);
+            margin-bottom: 4px;
+        }
+
+        .activity-time {
+            font-size: 10px;
+            color: #999;
+        }
+
+        .scanner-container {
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+        }
+
+        #video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .scanner-controls {
+            padding: 16px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .scanner-controls button {
+            flex: 1;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 200;
+            justify-content: flex-end;
+            flex-direction: column;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--surface);
+            border-radius: var(--radius) var(--radius) 0 0;
+            padding: 16px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text2);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 32px;
+            color: var(--text2);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .empty-state-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .empty-state-text {
+            font-size: 13px;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: var(--green-bg);
+            color: var(--green);
+            border: 1px solid var(--green);
+        }
+
+        .alert-error {
+            background: var(--red-bg);
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        .table th {
+            background: var(--surface2);
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 12px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .table tr:hover {
+            background: var(--primary-light);
+        }
+
+        .badge-pill {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            background: var(--primary);
+            color: var(--surface);
+        }
+
+        .badge-pill.danger {
+            background: var(--red);
+        }
+
+        .badge-pill.success {
+            background: var(--green);
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .quick-action-btn {
+            padding: 16px;
+            text-align: center;
+            border: none;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .quick-action-btn:active {
+            background: var(--primary-light);
+        }
+
+        .quick-action-icon {
+            font-size: 32px;
+        }
+
+        .quick-action-label {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .scanner-input {
+            padding: 12px 16px;
+            font-size: 16px;
+            border: 2px solid var(--primary) !important;
+        }
+
+        .matched-item {
+            background: var(--surface);
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            border: 2px solid var(--primary);
+        }
+
+        .matched-item-field {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .matched-item-field:last-child {
+            border-bottom: none;
+        }
+
+        .matched-item-label {
+            font-weight: 600;
+            color: var(--text2);
+        }
+
+        .matched-item-value {
+            font-weight: 600;
+        }
+
+        .history-filter-group {
+            background: var(--surface);
+            padding: 16px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 16px;
+        }
+
+        .history-filter-group .form-group {
+            margin-bottom: 12px;
+        }
+
+        .date-range-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .date-range-group input {
+            flex: 1;
+        }
+
+        @media (min-width: 768px) {
+            .summary-grid { grid-template-columns: repeat(4, 1fr); }
+        }
+    </style>
 </head>
 <body>
-
-<header>
-  <div class="hdr-icon">🔬</div>
-  <div>
-    <h1>在庫スキャナ</h1>
-    <div class="sub">GS1-128 / QR / GS1 DataMatrix 対応</div>
-  </div>
-</header>
-
-<div class="page">
-<div class="grid">
-
-  <!-- ── Camera card ── -->
-  <div class="card">
-    <div class="card-hdr">📷 <span>カメラスキャン</span></div>
-
-    <div id="viewport">
-      <video id="video" playsinline autoplay muted></video>
-      <canvas id="overlay"></canvas>
-
-      <!-- Scan-frame (shown after camera starts) -->
-      <div class="sf" id="scanFrame" style="display:none">
-        <div class="sf-b"></div>
-        <div class="scan-line"></div>
-      </div>
-
-      <div class="cam-bar">
-        <div class="dot" id="statusDot"></div>
-        <span id="statusText">待機中 — 開始を押してください</span>
-      </div>
+    <div class="app-header">
+        <h1>在庫管理システム</h1>
     </div>
 
-    <!-- Last-scan result -->
-    <div id="resultBox">
-      <div class="res-head">✅ 読み取り成功</div>
-      <div class="res-grid">
-        <span class="res-k">RAW</span>      <span class="res-v" id="lastRaw"></span>
-        <span class="res-k">GTIN (01)</span><span class="res-v" id="lastGTIN"></span>
-        <span class="res-k">期限 (17)</span><span class="res-v" id="lastEXP"></span>
-        <span class="res-k">LOT (10)</span>  <span class="res-v" id="lastLOT"></span>
-      </div>
-    </div>
+    <div class="app-container">
+        <!-- Dashboard -->
+        <div id="dashboard" class="tab-content active">
+            <div class="quick-actions">
+                <button class="quick-action-btn" onclick="app.switchTab('inventory')">
+                    <span class="quick-action-icon">📋</span>
+                    <span class="quick-action-label">在庫一覧</span>
+                </button>
+                <button class="quick-action-btn" onclick="app.switchTab('scanner')">
+                    <span class="quick-action-icon">📱</span>
+                    <span class="quick-action-label">入出庫登録</span>
+                </button>
+                <button class="quick-action-btn" onclick="app.switchTab('expiry')">
+                    <span class="quick-action-icon">⏰</span>
+                    <span class="quick-action-label">期限管理</span>
+                </button>
+                <button class="quick-action-btn" onclick="app.switchTab('history')">
+                    <span class="quick-action-icon">📊</span>
+                    <span class="quick-action-label">入出庫履歴</span>
+                </button>
+            </div>
 
-    <div class="controls">
-      <div class="row">
-        <button class="btn-p" id="btnStart">▶ 開始</button>
-        <button class="btn-s" id="btnStop"  disabled>⏹ 停止</button>
-        <button class="btn-s" id="btnTorch" disabled>🔦 ライト</button>
-      </div>
+            <div class="card">
+                <h2 class="card-title">概要</h2>
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="summary-value" id="totalItems">-</div>
+                        <div class="summary-label">登録品目</div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-value" id="inStock">-</div>
+                        <div class="summary-label">在庫あり</div>
+                    </div>
+                    <div class="summary-card warning">
+                        <div class="summary-value" id="expiringSoon">-</div>
+                        <div class="summary-label">期限切迫</div>
+                    </div>
+                    <div class="summary-card danger">
+                        <div class="summary-value" id="expired">-</div>
+                        <div class="summary-label">期限切れ</div>
+                    </div>
+                </div>
+            </div>
 
-      <div>
-        <label class="fl">スキャンモード</label>
-        <select id="mode">
-          <option value="auto" selected>自動（推奨：1D + 2D）</option>
-          <option value="1d">1Dのみ（GS1-128 / Code128）</option>
-          <option value="2d">2Dのみ（QR / GS1 DataMatrix）</option>
-        </select>
-      </div>
+            <div class="card">
+                <h2 class="card-title">最近の入出庫</h2>
+                <div id="recentActivity" class="activity-list"></div>
+            </div>
 
-      <div id="zoomSection" style="display:none">
-        <div class="row" style="margin-bottom:4px">
-          <label class="fl" style="margin:0">ズーム</label>
-          <span style="font-size:11px;color:var(--text2)" id="zoomVal">1.0×</span>
+            <div class="card">
+                <button class="btn btn-primary btn-block" onclick="document.getElementById('importModal').classList.add('active')">
+                    📥 Excelファイルをインポート
+                </button>
+                <button class="btn btn-secondary btn-block" onclick="app.exportData()">
+                    📤 データをエクスポート
+                </button>
+            </div>
         </div>
-        <input id="zoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
-      </div>
 
-      <div>
-        <label class="fl">手入力 / 貼り付け（Cognex の ]C1… もOK）</label>
-        <div class="row">
-          <input id="manual" type="text" class="mono"
-                 placeholder="]C101049123456789031724033110ABC123"
-                 style="flex:1;min-width:0" />
-          <button class="btn-s" id="btnManual">解析</button>
+        <!-- Inventory -->
+        <div id="inventory" class="tab-content">
+            <div class="search-box">
+                <span class="search-icon">🔍</span>
+                <input type="text" class="form-input search-input" id="inventorySearch" placeholder="品目名、メーカー、コードで検索...">
+            </div>
+
+            <div class="filters" id="inventoryFilters">
+                <button class="filter-btn active" data-filter="all">すべて</button>
+                <button class="filter-btn" data-filter="in-stock">在庫あり</button>
+                <button class="filter-btn" data-filter="expiring-30">30日以内</button>
+                <button class="filter-btn" data-filter="expiring-90">90日以内</button>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">ソート</label>
+                <select class="form-select" id="inventorySortBy">
+                    <option value="name">品目名</option>
+                    <option value="stock">在庫数</option>
+                    <option value="expiry">使用期限</option>
+                    <option value="code">コード</option>
+                </select>
+            </div>
+
+            <div id="inventoryList" class="item-list"></div>
         </div>
-      </div>
 
-      <div class="hint">
-        <strong>読み取りのコツ：</strong><br>
-        ・バーコードを枠内に収め、画面幅の ½ 以上に拡大する<br>
-        ・ラミネート反射 → 少し角度を変える / ライト OFF も試す<br>
-        ・ブレないよう静止させる（机固定が効果的）
-      </div>
+        <!-- Scanner -->
+        <div id="scanner" class="tab-content">
+            <div class="card">
+                <h2 class="card-title">バーコードスキャナー</h2>
+                <div class="scanner-container" id="scannerContainer" style="display: none;">
+                    <video id="video" playsinline></video>
+                </div>
+                <div class="scanner-controls">
+                    <button class="btn btn-primary" onclick="app.startScanner()">📷 スキャン開始</button>
+                    <button class="btn btn-secondary" onclick="app.stopScanner()">⏹️ 停止</button>
+                </div>
 
-      <div id="debug"></div>
+                <input type="text" class="form-input scanner-input" id="barcodeInput" placeholder="バーコードを入力またはスキャン...">
+            </div>
+
+            <div id="scannerResult"></div>
+
+            <div id="transactionForm" class="card" style="display: none;">
+                <h2 class="card-title">入出庫登録</h2>
+
+                <div class="form-group">
+                    <label class="form-label">品目</label>
+                    <div class="matched-item" id="matchedItemDisplay"></div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">入庫/出庫</label>
+                    <div style="display: flex; gap: 12px;">
+                        <button class="btn" style="flex: 1; background: var(--primary); color: var(--surface);" id="inButton" onclick="app.setTransactionType('入庫')">📥 入庫</button>
+                        <button class="btn" style="flex: 1; background: var(--surface); color: var(--text); border: 2px solid var(--red);" id="outButton" onclick="app.setTransactionType('出庫')">📤 出庫</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">担当者名</label>
+                    <input type="text" class="form-input" id="transactionPerson" placeholder="担当者の名前を入力">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">数量</label>
+                    <input type="number" class="form-input" id="transactionQuantity" placeholder="0" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">使用期限 (YYMMDD)</label>
+                    <input type="text" class="form-input" id="transactionExpiry" placeholder="260228">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">ロット番号</label>
+                    <input type="text" class="form-input" id="transactionLot" placeholder="ロット番号">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">コメント</label>
+                    <textarea class="form-textarea" id="transactionComment" placeholder="追記があればここに入力..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <button class="btn btn-success btn-block" onclick="app.submitTransaction()">✅ 登録</button>
+                    <button class="btn btn-secondary btn-block" onclick="app.resetTransaction()">🔄 リセット</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expiry -->
+        <div id="expiry" class="tab-content">
+            <div class="filters" id="expiryFilters" style="margin-bottom: 16px;">
+                <button class="filter-btn active" data-filter="all">すべて</button>
+                <button class="filter-btn" data-filter="expired">期限切れ</button>
+                <button class="filter-btn" data-filter="expiring-30">30日以内</button>
+                <button class="filter-btn" data-filter="expiring-90">90日以内</button>
+            </div>
+
+            <div id="expiryList" class="item-list"></div>
+        </div>
+
+        <!-- History -->
+        <div id="history" class="tab-content">
+            <div class="history-filter-group">
+                <div class="form-group">
+                    <label class="form-label">期間</label>
+                    <div class="date-range-group">
+                        <input type="date" class="form-input" id="historyDateFrom">
+                        <div style="padding: 0 8px; display: flex; align-items: center;">～</div>
+                        <input type="date" class="form-input" id="historyDateTo">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">品目</label>
+                    <input type="text" class="form-input" id="historyItemName" placeholder="品目名で検索...">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">種別</label>
+                    <select class="form-select" id="historyType">
+                        <option value="">すべて</option>
+                        <option value="入庫">入庫</option>
+                        <option value="出庫">出庫</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <button class="btn btn-primary btn-block" onclick="app.filterHistory()">🔍 検索</button>
+                    <button class="btn btn-secondary btn-block" onclick="app.exportHistory()">📥 CSVエクスポート</button>
+                </div>
+            </div>
+
+            <div id="historyTable" style="overflow-x: auto;"></div>
+        </div>
     </div>
-  </div>
 
-  <!-- ── History card ── -->
-  <div class="card">
-    <div class="card-hdr">
-      📋 <span>スキャン履歴</span>
-      <div class="ml">
-        <button class="btn-g" id="btnCsv">⬇ CSV</button>
-        <button class="btn-d" id="btnClear">🗑 クリア</button>
-      </div>
+    <!-- Bottom Nav -->
+    <div class="bottom-nav">
+        <button class="nav-item active" onclick="app.switchTab('dashboard')">
+            <span class="nav-icon">🏠</span>
+        </button>
+        <button class="nav-item" onclick="app.switchTab('inventory')">
+            <span class="nav-icon">📋</span>
+        </button>
+        <button class="nav-item" onclick="app.switchTab('scanner')">
+            <span class="nav-icon">📱</span>
+        </button>
+        <button class="nav-item" onclick="app.switchTab('expiry')">
+            <span class="nav-icon">⏰</span>
+        </button>
+        <button class="nav-item" onclick="app.switchTab('history')">
+            <span class="nav-icon">📊</span>
+        </button>
     </div>
 
-    <div style="padding:16px">
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>時刻</th>
-              <th>GTIN (01)</th>
-              <th>期限 (17)</th>
-              <th>LOT (10)</th>
-              <th>生データ</th>
-            </tr>
-          </thead>
-          <tbody id="tbody">
-            <tr><td colspan="5">
-              <div class="empty">
-                <div class="ei">📦</div>
-                スキャン履歴はありません
-              </div>
-            </td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p style="font-size:11px;color:var(--text2);margin-top:10px">
-        CSV列：time / gtin / exp / lot / raw　（exp は YYMMDD → 20YY-MM-DD）
-      </p>
+    <!-- Import Modal -->
+    <div id="importModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Excelファイルをインポート</h2>
+                <button class="close-btn" onclick="document.getElementById('importModal').classList.remove('active')">✕</button>
+            </div>
+
+            <div id="importAlert"></div>
+
+            <div class="form-group">
+                <label class="form-label">ファイルを選択</label>
+                <input type="file" id="importFile" class="form-input" accept=".xlsx,.xls">
+            </div>
+
+            <button class="btn btn-primary btn-block" onclick="app.importData()">
+                📥 インポート
+            </button>
+        </div>
     </div>
-  </div>
 
-</div><!-- .grid -->
-</div><!-- .page -->
+    <!-- Scripts -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/@ericblade/quagga2@1.7.3/dist/quagga.js"></script>
+    <script src="https://unpkg.com/@zxing/library@0.19.3/umd/index.min.js"></script>
 
-<script>
-/* ===== 定数 ===== */
-const COOLDOWN = 1200;   // 同一コード連続登録防止 ms
-const MAX_ROWS = 500;
-const GS       = String.fromCharCode(29);
+    <script>
+        class InventoryApp {
+            constructor() {
+                this.db = null;
+                this.items = [];
+                this.history = [];
+                this.currentTab = 'dashboard';
+                this.currentTransactionType = '入庫';
+                this.currentScanItem = null;
+                this.scannerActive = false;
+                this.init();
+            }
 
-/* ===== GS1 パーサー (01/17/10) ===== */
-function normalizeRaw(raw) {
-  if (!raw) return '';
-  raw = raw.trim();
-  if (/^\]([Cc]1|[Ee]0)/.test(raw)) raw = raw.slice(3);
-  return raw.replace(/\(/g, '').replace(/\)/g, '');
-}
-function fmtYYMMDD(s) {
-  if (!/^\d{6}$/.test(s)) return '';
-  return `20${s.slice(0,2)}-${s.slice(2,4)}-${s.slice(4,6)}`;
-}
-function parseGS1(rawInput) {
-  const s   = normalizeRaw(rawInput);
-  const out = { gtin:'', exp:'', lot:'' };
-  let i = 0;
-  while (i < s.length) {
-    if (s[i] === GS) { i++; continue; }
-    const a2 = s.slice(i, i+2);
-    if (a2 === '01') { const v = s.slice(i+2, i+16); if (/^\d{14}$/.test(v)) out.gtin = v; i += 16; continue; }
-    if (a2 === '17') { const v = s.slice(i+2, i+8);  if (/^\d{6}$/.test(v))  out.exp  = fmtYYMMDD(v); i += 8; continue; }
-    if (a2 === '10') {
-      const st = i+2, gp = s.indexOf(GS, st);
-      const en = gp !== -1 ? gp : Math.min(st+20, s.length);
-      out.lot = s.slice(st, en); i = en; continue;
-    }
-    if (a2 === '00') { i += 20; continue; }
-    if (a2 === '02') { i += 16; continue; }
-    if (['11','12','13','15','16','18','19','20'].includes(a2)) { i += 8; continue; }
-    if (a2 === '21') { const st=i+2, gp=s.indexOf(GS,st); i = gp!==-1?gp:Math.min(st+20,s.length); continue; }
-    if (/^3[1-6]/.test(a2)) { i += 10; continue; }
-    const ng = s.indexOf(GS, i);
-    if (ng !== -1) { i = ng; } else break;
-  }
-  return out;
-}
+            async init() {
+                await this.initDB();
+                this.setupEventListeners();
+                await this.loadData();
+                this.updateDashboard();
+            }
 
-/* ===== DOM 参照 ===== */
-const videoEl    = document.getElementById('video');
-const overlay    = document.getElementById('overlay');
-const ctx        = overlay.getContext('2d');
-const btnStart   = document.getElementById('btnStart');
-const btnStop    = document.getElementById('btnStop');
-const btnTorch   = document.getElementById('btnTorch');
-const statusDot  = document.getElementById('statusDot');
-const statusTxt  = document.getElementById('statusText');
-const modeEl     = document.getElementById('mode');
-const zoomEl     = document.getElementById('zoom');
-const zoomVal    = document.getElementById('zoomVal');
-const zoomSec    = document.getElementById('zoomSection');
-const manualEl   = document.getElementById('manual');
-const debugEl    = document.getElementById('debug');
-const resultBox  = document.getElementById('resultBox');
-const lastRawEl  = document.getElementById('lastRaw');
-const lastGTINEl = document.getElementById('lastGTIN');
-const lastEXPEl  = document.getElementById('lastEXP');
-const lastLOTEl  = document.getElementById('lastLOT');
-const tbody      = document.getElementById('tbody');
-const scanFrame  = document.getElementById('scanFrame');
+            async initDB() {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open('InventoryDB', 1);
 
-/* ===== 状態 ===== */
-let rows = [], lastSeen = new Map();
-let stream = null, track = null, torchOn = false;
-let running = false, quaggaRunning = false, zxingRunning = false;
+                    request.onerror = () => reject(request.error);
+                    request.onsuccess = () => {
+                        this.db = request.result;
+                        resolve();
+                    };
 
-/* ===== ZXing セットアップ（MultiFormatReader = 低レベル同期 API） ===== */
-// BrowserMultiFormatReader.decodeFromCanvas() はバージョンにより非同期化/削除されるため
-// バージョン間で安定した MultiFormatReader + HTMLCanvasElementLuminanceSource を使用
-const zxingReader = (() => {
-  const hints = new Map();
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-    ZXing.BarcodeFormat.CODE_128,
-    ZXing.BarcodeFormat.QR_CODE,
-    ZXing.BarcodeFormat.DATA_MATRIX,
-    ZXing.BarcodeFormat.AZTEC,
-    ZXing.BarcodeFormat.PDF_417
-  ]);
-  const r = new ZXing.MultiFormatReader();
-  r.setHints(hints);
-  return r;
-})();
-const zxingCanvas = document.createElement('canvas');
-let zxTimer = null;
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains('items')) {
+                            db.createObjectStore('items', { keyPath: 'id' });
+                        }
+                        if (!db.objectStoreNames.contains('history')) {
+                            db.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
+                        }
+                        if (!db.objectStoreNames.contains('settings')) {
+                            db.createObjectStore('settings', { keyPath: 'key' });
+                        }
+                    };
+                });
+            }
 
-/* ===== Quagga2 コマ送り用キャンバス ===== */
-const q2Canvas = document.createElement('canvas');
-let q2Timer = null;
+            setupEventListeners() {
+                document.getElementById('inventorySearch').addEventListener('input', () => this.filterInventory());
+                document.getElementById('inventorySortBy').addEventListener('change', () => this.filterInventory());
+                
+                document.querySelectorAll('#inventoryFilters .filter-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.querySelectorAll('#inventoryFilters .filter-btn').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        this.filterInventory();
+                    });
+                });
 
-/* ===== ユーティリティ ===== */
-function setStatus(msg, state = 'idle') {
-  statusTxt.textContent   = msg;
-  statusDot.className     = 'dot' + (state === 'scanning' ? ' scanning'
-                                    : state === 'error'    ? ' error' : '');
-}
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, m =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
-function csvEsc(v) {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-}
+                document.querySelectorAll('#expiryFilters .filter-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.querySelectorAll('#expiryFilters .filter-btn').forEach(b => b.classList.remove('active'));
+                        e.target.classList.add('active');
+                        this.filterExpiry();
+                    });
+                });
 
-function resizeOverlay() {
-  const r = videoEl.getBoundingClientRect();
-  overlay.width  = Math.floor(r.width  * devicePixelRatio);
-  overlay.height = Math.floor(r.height * devicePixelRatio);
-  overlay.style.width  = r.width  + 'px';
-  overlay.style.height = r.height + 'px';
-  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-}
-window.addEventListener('resize', resizeOverlay);
+                document.getElementById('barcodeInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.processBarcodeInput(e.target.value);
+                        e.target.value = '';
+                    }
+                });
 
-function setupTorchZoom() {
-  if (!track) return;
-  const caps = track.getCapabilities?.() || {};
-  btnTorch.disabled = !caps.torch;
-  if (caps.zoom) {
-    zoomEl.disabled = false;
-    zoomEl.min   = caps.zoom.min;
-    zoomEl.max   = caps.zoom.max;
-    zoomEl.step  = caps.zoom.step || 0.1;
-    zoomEl.value = caps.zoom.min;
-    zoomVal.textContent = `${Number(caps.zoom.min).toFixed(1)}×`;
-    zoomSec.style.display = 'block';
-  } else {
-    zoomEl.disabled = true;
-    zoomSec.style.display = 'none';
-  }
-}
+                const today = new Date();
+                const firstDay = new Date(today.getFullYear(), 0, 1);
+                document.getElementById('historyDateFrom').valueAsDate = firstDay;
+                document.getElementById('historyDateTo').valueAsDate = today;
+            }
 
-/* ===== カメラ起動（常に getUserMedia で直接制御） ===== */
-async function startCamera() {
-  setStatus('カメラ起動中…');
-  const constraints = {
-    audio: false,
-    video: {
-      facingMode: { ideal: 'environment' },
-      width:     { ideal: 1920 },
-      height:    { ideal: 1080 },
-      frameRate: { ideal: 30, max: 30 }
-    }
-  };
-  stream = await navigator.mediaDevices.getUserMedia(constraints);
+            switchTab(tabName) {
+                document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
 
-  // srcObject をセットしてから必ず play() を呼ぶ（黒画面防止の核心）
-  videoEl.srcObject = stream;
-  await videoEl.play().catch(() => {});
+                document.getElementById(tabName).classList.add('active');
+                document.querySelector(`[onclick="app.switchTab('${tabName}')"]`).classList.add('active');
 
-  // videoWidth が確定するまで待つ
-  await new Promise(resolve => {
-    if (videoEl.videoWidth > 0) { resolve(); return; }
-    const onReady = () => { videoEl.removeEventListener('loadeddata', onReady); resolve(); };
-    videoEl.addEventListener('loadeddata', onReady);
-    setTimeout(resolve, 2500); // フォールバック
-  });
+                this.currentTab = tabName;
 
-  track = stream.getVideoTracks()[0] || null;
-  resizeOverlay();
-  setupTorchZoom();
-  scanFrame.style.display = 'block';
-}
+                if (tabName === 'inventory') this.filterInventory();
+                else if (tabName === 'expiry') this.filterExpiry();
+                else if (tabName === 'history') this.filterHistory();
+            }
 
-/* ===== 1D スキャン（Quagga2 を decodeSingle で使用） ===== */
-function start1D() {
-  if (typeof Quagga === 'undefined' || typeof Quagga.decodeSingle !== 'function') {
-    debugEl.textContent = '⚠ Quagga2 ライブラリが読み込まれていません。1D スキャンは無効です。';
-    return;
-  }
-  quaggaRunning = true;
-  q2Tick();
-}
+            async loadData() {
+                const transaction = this.db.transaction(['items', 'history'], 'readonly');
+                this.items = await this.getAll(transaction.objectStore('items'));
+                this.history = await this.getAll(transaction.objectStore('history'));
+            }
 
-function q2Tick() {
-  if (!quaggaRunning || !running) return;
-  const w = videoEl.videoWidth, h = videoEl.videoHeight;
-  if (videoEl.readyState < 2 || w === 0) {
-    q2Timer = setTimeout(q2Tick, 300); return;
-  }
-  q2Canvas.width  = w;
-  q2Canvas.height = h;
-  q2Canvas.getContext('2d').drawImage(videoEl, 0, 0, w, h);
-  const src = q2Canvas.toDataURL('image/jpeg', 0.82);
+            getAll(objectStore) {
+                return new Promise((resolve, reject) => {
+                    const request = objectStore.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+            }
 
-  let done = false;
-  const guard = setTimeout(() => {
-    if (!done) { done = true; if (quaggaRunning && running) q2Timer = setTimeout(q2Tick, 300); }
-  }, 1500);
+            async saveItem(item) {
+                return new Promise((resolve, reject) => {
+                    const transaction = this.db.transaction(['items'], 'readwrite');
+                    const request = transaction.objectStore('items').put(item);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            }
 
-  Quagga.decodeSingle({
-    decoder:  { readers: ['code_128_reader'], multiple: false },
-    locate:   true,
-    locator:  { patchSize: 'medium', halfSample: true },
-    numOfWorkers: 0,   // decodeSingle はシングルスレッド
-    src
-  }, result => {
-    if (done) return;
-    done = true;
-    clearTimeout(guard);
-    if (result?.codeResult?.code?.length >= 4) addDetected(result.codeResult.code);
-    if (quaggaRunning && running) q2Timer = setTimeout(q2Tick, 280);
-  });
-}
+            async saveHistory(entry) {
+                return new Promise((resolve, reject) => {
+                    const transaction = this.db.transaction(['history'], 'readwrite');
+                    const request = transaction.objectStore('history').add(entry);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            }
 
-/* ===== 2D スキャン（ZXing キャンバスループ） ===== */
-function start2D() {
-  zxingRunning = true;
-  zxTick();
-}
-function zxTick() {
-  if (!zxingRunning || !running) return;
-  const w = videoEl.videoWidth, h = videoEl.videoHeight;
-  if (videoEl.readyState >= 2 && w > 0) {
-    zxingCanvas.width  = w;
-    zxingCanvas.height = h;
-    const imgCtx = zxingCanvas.getContext('2d');
-    imgCtx.drawImage(videoEl, 0, 0, w, h);
-    try {
-      const lum    = new ZXing.HTMLCanvasElementLuminanceSource(zxingCanvas);
-      const bmp    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-      const result = zxingReader.decode(bmp);
-      if (result) addDetected(result.getText());
-    } catch(e) {
-      /* NotFoundException = バーコードなし（正常）。他のエラーは無視 */
-    }
-  }
-  zxTimer = setTimeout(zxTick, 300);
-}
+            async deleteAllItems() {
+                return new Promise((resolve, reject) => {
+                    const transaction = this.db.transaction(['items'], 'readwrite');
+                    const request = transaction.objectStore('items').clear();
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            }
 
-/* ===== スキャン開始 ===== */
-async function startScan() {
-  await stopAll();
-  running = true;
-  btnStart.disabled = true;
-  btnStop.disabled  = false;
+            formatDate(yymmdd) {
+                if (!yymmdd) return '';
+                const str = String(yymmdd).padStart(6, '0');
+                const yy = parseInt(str.substring(0, 2));
+                const mm = parseInt(str.substring(2, 4));
+                const dd = parseInt(str.substring(4, 6));
 
-  await startCamera();   // 共通：カメラを起動して video に表示
+                if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
+                    return `20${yy}年${mm}月`;
+                }
 
-  const mode = modeEl.value;
-  if (mode === '1d') {
-    start1D();
-    setStatus('スキャン中（1D: GS1-128 / Code128）', 'scanning');
-  } else if (mode === '2d') {
-    start2D();
-    setStatus('スキャン中（2D: QR / DataMatrix）', 'scanning');
-  } else {
-    start1D(); start2D();
-    setStatus('スキャン中（自動：1D + 2D）', 'scanning');
-  }
-}
+                const year = 2000 + yy;
+                const date = new Date(year, mm - 1, dd);
+                return date.toLocaleDateString('ja-JP');
+            }
 
-/* ===== 停止 ===== */
-async function stopAll() {
-  quaggaRunning = false;
-  zxingRunning  = false;
-  clearTimeout(q2Timer);
-  clearTimeout(zxTimer);
-  q2Timer = null; zxTimer = null;
-  try { stream?.getTracks().forEach(t => t.stop()); } catch(e) {}
-  stream = null; track = null; torchOn = false;
-  videoEl.srcObject = null;
-  running           = false;
-  btnStart.disabled = false;
-  btnStop.disabled  = true;
-  btnTorch.disabled = true;
-  scanFrame.style.display = 'none';
-  ctx.clearRect(0, 0, overlay.width, overlay.height);
-  setStatus('停止中', 'idle');
-}
+            getExpiryStatus(yymmdd) {
+                if (!yymmdd) return 'unknown';
 
-/* ===== 読み取り登録 ===== */
-function addDetected(raw) {
-  if (!raw) return;
-  const now = Date.now();
-  if (now - (lastSeen.get(raw) || 0) < COOLDOWN) return;
-  lastSeen.set(raw, now);
+                const str = String(yymmdd).padStart(6, '0');
+                const yy = parseInt(str.substring(0, 2));
+                const mm = parseInt(str.substring(2, 4));
+                const dd = parseInt(str.substring(4, 6));
 
-  const p   = parseGS1(raw);
-  const rec = { time: new Date().toLocaleString(), gtin: p.gtin, exp: p.exp, lot: p.lot, raw };
-  rows.push(rec);
-  if (rows.length > MAX_ROWS) rows.shift();
+                if (mm < 1 || mm > 12) return 'unknown';
 
-  lastRawEl.textContent  = raw;
-  lastGTINEl.textContent = p.gtin;
-  lastEXPEl.textContent  = p.exp;
-  lastLOTEl.textContent  = p.lot;
-  resultBox.classList.add('show');
+                const year = 2000 + yy;
+                let expiryDate;
 
-  if (navigator.vibrate) navigator.vibrate(30);
-  try {
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
-    const o  = ac.createOscillator(), g = ac.createGain();
-    o.frequency.value = 880; g.gain.value = 0.02;
-    o.connect(g); g.connect(ac.destination);
-    o.start(); setTimeout(() => { o.stop(); ac.close(); }, 80);
-  } catch(e) {}
+                if (dd < 1 || dd > 31) {
+                    expiryDate = new Date(year, mm, 0);
+                } else {
+                    expiryDate = new Date(year, mm - 1, dd);
+                }
 
-  setStatus('読み取りOK ✓', 'scanning');
-  render();
-}
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                expiryDate.setHours(0, 0, 0, 0);
 
-/* ===== テーブル描画 ===== */
-function render() {
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5"><div class="empty"><div class="ei">📦</div>スキャン履歴はありません</div></td></tr>';
-    return;
-  }
-  tbody.innerHTML = '';
-  [...rows].reverse().forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td style="white-space:nowrap;font-size:11px">${esc(r.time)}</td>
-      <td class="mono">${esc(r.gtin)}</td>
-      <td class="mono">${esc(r.exp)}</td>
-      <td class="mono">${esc(r.lot)}</td>
-      <td class="mono" style="font-size:10px;max-width:160px;word-break:break-all">${esc(r.raw)}</td>`;
-    tbody.appendChild(tr);
-  });
-}
+                const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
 
-/* ===== CSV ダウンロード ===== */
-function downloadCSV() {
-  let csv = 'time,gtin,exp,lot,raw\n';
-  rows.forEach(r => {
-    csv += [r.time, r.gtin, r.exp, r.lot, r.raw].map(csvEsc).join(',') + '\n';
-  });
-  const a = document.createElement('a');
-  a.href     = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `scan_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();
-}
+                if (daysUntilExpiry < 0) return 'expired';
+                if (daysUntilExpiry <= 30) return 'expiring-soon';
+                if (daysUntilExpiry <= 90) return 'warning';
+                return 'ok';
+            }
 
-/* ===== ライト ===== */
-async function toggleTorch() {
-  if (!track) return;
-  const caps = track.getCapabilities?.();
-  if (!caps?.torch) { alert('この端末はライト制御に非対応です'); return; }
-  torchOn = !torchOn;
-  await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-  btnTorch.textContent = torchOn ? '🔦 OFF' : '🔦 ライト';
-}
+            getExpiryStatusLabel(status) {
+                const labels = {
+                    'expired': { text: '期限切れ', class: 'expired' },
+                    'expiring-soon': { text: '30日以内', class: 'expiring-soon' },
+                    'warning': { text: '90日以内', class: 'warning' },
+                    'ok': { text: '正常', class: 'ok' },
+                    'unknown': { text: '不明', class: 'ok' }
+                };
+                return labels[status] || labels['ok'];
+            }
 
-/* ===== ズーム ===== */
-async function setZoom(v) {
-  if (!track) return;
-  const caps = track.getCapabilities?.();
-  if (!caps?.zoom) return;
-  await track.applyConstraints({ advanced: [{ zoom: Number(v) }] });
-}
+            updateDashboard() {
+                const expired = this.items.filter(item => {
+                    return this.getExpiryStatus(item['入庫後最新使用期限(日付)']) === 'expired';
+                }).length;
 
-/* ===== イベント ===== */
-btnStart.addEventListener('click', async () => {
-  debugEl.textContent = '';
-  try {
-    await startScan();
-  } catch(e) {
-    console.error(e);
-    setStatus('起動失敗', 'error');
-    debugEl.textContent = 'カメラ起動に失敗しました。HTTPS必須・カメラ許可を確認してください。';
-    running = false;
-    btnStart.disabled = false;
-    btnStop.disabled  = true;
-    scanFrame.style.display = 'none';
-  }
-});
+                const expiringSoon = this.items.filter(item => {
+                    return this.getExpiryStatus(item['入庫後最新使用期限(日付)']) === 'expiring-soon';
+                }).length;
 
-btnStop.addEventListener('click', stopAll);
-btnTorch.addEventListener('click', toggleTorch);
-zoomEl.addEventListener('input', e => {
-  setZoom(e.target.value);
-  zoomVal.textContent = `${Number(e.target.value).toFixed(1)}×`;
-});
+                const inStock = this.items.filter(item => item['在庫数'] > 0).length;
 
-document.getElementById('btnCsv').addEventListener('click', downloadCSV);
-document.getElementById('btnClear').addEventListener('click', () => {
-  rows = []; lastSeen.clear();
-  resultBox.classList.remove('show');
-  lastRawEl.textContent = lastGTINEl.textContent =
-  lastEXPEl.textContent = lastLOTEl.textContent = '';
-  setStatus('履歴クリア', 'idle');
-  render();
-});
+                document.getElementById('totalItems').textContent = this.items.length;
+                document.getElementById('inStock').textContent = inStock;
+                document.getElementById('expiringSoon').textContent = expiringSoon;
+                document.getElementById('expired').textContent = expired;
 
-document.getElementById('btnManual').addEventListener('click', () => {
-  const v = manualEl.value.trim();
-  if (!v) return;
-  addDetected(v);
-  manualEl.value = '';
-});
-manualEl.addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('btnManual').click();
-});
-</script>
+                const recentActivity = this.history.slice(-10).reverse();
+                const activityHtml = recentActivity.length > 0
+                    ? recentActivity.map(entry => `
+                        <div class="activity-item ${entry['入庫/出庫'] === '出庫' ? 'out' : ''}">
+                            <div class="activity-icon">${entry['入庫/出庫'] === '出庫' ? '📤' : '📥'}</div>
+                            <div class="activity-content">
+                                <div class="activity-title">${entry['物品名']}</div>
+                                <div class="activity-detail">数量: ${entry['数量']} | ${entry['入庫/出庫']}</div>
+                                <div class="activity-detail">担当: ${entry['入出庫者'] || '未設定'}</div>
+                                <div class="activity-time">${new Date(entry['入出庫日']).toLocaleString('ja-JP')}</div>
+                            </div>
+                        </div>
+                    `).join('')
+                    : '<div class="empty-state"><div class="empty-state-text">履歴がありません</div></div>';
+
+                document.getElementById('recentActivity').innerHTML = activityHtml;
+            }
+
+            filterInventory() {
+                const searchTerm = document.getElementById('inventorySearch').value.toLowerCase();
+                const activeFilter = document.querySelector('#inventoryFilters .filter-btn.active').dataset.filter;
+                const sortBy = document.getElementById('inventorySortBy').value;
+
+                let filtered = this.items.filter(item => {
+                    const matchesSearch = !searchTerm ||
+                        item['物品名'].toLowerCase().includes(searchTerm) ||
+                        item['メーカー'].toLowerCase().includes(searchTerm) ||
+                        String(item['コード']).includes(searchTerm) ||
+                        String(item['物品コード']).includes(searchTerm);
+
+                    if (!matchesSearch) return false;
+
+                    const expiryStatus = this.getExpiryStatus(item['入庫後最新使用期限(日付)']);
+
+                    if (activeFilter === 'all') return true;
+                    if (activeFilter === 'in-stock') return item['在庫数'] > 0;
+                    if (activeFilter === 'expiring-30') return expiryStatus === 'expiring-soon';
+                    if (activeFilter === 'expiring-90') return expiryStatus === 'warning' || expiryStatus === 'expiring-soon';
+
+                    return true;
+                });
+
+                filtered.sort((a, b) => {
+                    if (sortBy === 'name') return a['物品名'].localeCompare(b['物品名'], 'ja');
+                    if (sortBy === 'stock') return b['在庫数'] - a['在庫数'];
+                    if (sortBy === 'expiry') {
+                        const aExp = a['入庫後最新使用期限(日付)'] || 999999;
+                        const bExp = b['入庫後最新使用期限(日付)'] || 999999;
+                        return aExp - bExp;
+                    }
+                    if (sortBy === 'code') return String(a['コード']).localeCompare(String(b['コード']));
+                    return 0;
+                });
+
+                this.displayInventory(filtered);
+            }
+
+            displayInventory(items) {
+                const html = items.length > 0
+                    ? items.map(item => {
+                        const expiryStatus = this.getExpiryStatus(item['入庫後最新使用期限(日付)']);
+                        const statusLabel = this.getExpiryStatusLabel(expiryStatus);
+                        const stockClass = item['在庫数'] === 0 ? 'stock-low' : item['在庫数'] < 5 ? 'stock-warning' : '';
+
+                        return `
+                            <div class="item-card ${stockClass}">
+                                <div class="item-info">
+                                    <div class="item-name">${item['物品名']}</div>
+                                    <div class="item-detail">
+                                        <small><strong>メーカー:</strong> ${item['メーカー']}</small>
+                                        <small><strong>規格:</strong> ${item['規格']}</small>
+                                        <small><strong>コード:</strong> ${item['コード']} / ${item['物品コード']}</small>
+                                    </div>
+                                    <span class="expiry-status ${statusLabel.class}">${statusLabel.text}</span>
+                                    <div class="item-detail" style="margin-top: 4px;">
+                                        期限: ${this.formatDate(item['入庫後最新使用期限(日付)'])}
+                                    </div>
+                                </div>
+                                <div class="item-stock">
+                                    <div class="stock-number">${item['在庫数']}</div>
+                                    <div style="font-size: 12px; color: var(--text2);">個</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')
+                    : `<div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-title">該当する品目がありません</div>
+                        <div class="empty-state-text">別の条件で検索してみてください</div>
+                    </div>`;
+
+                document.getElementById('inventoryList').innerHTML = html;
+            }
+
+            filterExpiry() {
+                const activeFilter = document.querySelector('#expiryFilters .filter-btn.active').dataset.filter;
+
+                let filtered = this.items.filter(item => {
+                    if (item['在庫数'] === 0) return false;
+
+                    const expiryStatus = this.getExpiryStatus(item['入庫後最新使用期限(日付)']);
+
+                    if (activeFilter === 'all') return true;
+                    if (activeFilter === 'expired') return expiryStatus === 'expired';
+                    if (activeFilter === 'expiring-30') return expiryStatus === 'expiring-soon';
+                    if (activeFilter === 'expiring-90') return expiryStatus === 'warning' || expiryStatus === 'expiring-soon';
+
+                    return true;
+                });
+
+                filtered.sort((a, b) => {
+                    const aExp = a['入庫後最新使用期限(日付)'] || 999999;
+                    const bExp = b['入庫後最新使用期限(日付)'] || 999999;
+                    return aExp - bExp;
+                });
+
+                this.displayExpiry(filtered);
+            }
+
+            displayExpiry(items) {
+                const html = items.length > 0
+                    ? items.map(item => {
+                        const expiryStatus = this.getExpiryStatus(item['入庫後最新使用期限(日付)']);
+                        const statusLabel = this.getExpiryStatusLabel(expiryStatus);
+
+                        return `
+                            <div class="item-card">
+                                <div class="item-info">
+                                    <div class="item-name">${item['物品名']}</div>
+                                    <div class="item-detail">
+                                        <small><strong>メーカー:</strong> ${item['メーカー']}</small>
+                                        <small><strong>期限:</strong> ${this.formatDate(item['入庫後最新使用期限(日付)'])}</small>
+                                    </div>
+                                    <span class="expiry-status ${statusLabel.class}">${statusLabel.text}</span>
+                                </div>
+                                <div class="item-stock">
+                                    <div class="stock-number">${item['在庫数']}</div>
+                                    <div style="font-size: 12px; color: var(--text2);">個</div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')
+                    : `<div class="empty-state">
+                        <div class="empty-state-icon">✅</div>
+                        <div class="empty-state-title">期限切れ商品はありません</div>
+                        <div class="empty-state-text">在庫が適切に管理されています</div>
+                    </div>`;
+
+                document.getElementById('expiryList').innerHTML = html;
+            }
+
+            processBarcodeInput(barcode) {
+                const matched = this.items.find(item =>
+                    String(item['コード']) === String(barcode) ||
+                    String(item['物品コード']) === String(barcode)
+                );
+
+                if (matched) {
+                    this.currentScanItem = matched;
+                    this.displayScanResult(matched);
+                    document.getElementById('transactionForm').style.display = 'flex';
+                } else {
+                    document.getElementById('scannerResult').innerHTML = `
+                        <div class="card">
+                            <div class="alert alert-error">
+                                ⚠️ バーコード「${barcode}」に一致する品目が見つかりません
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('transactionForm').style.display = 'none';
+                }
+            }
+
+            displayScanResult(item) {
+                const html = `
+                    <div class="matched-item-field">
+                        <span class="matched-item-label">品目名:</span>
+                        <span class="matched-item-value">${item['物品名']}</span>
+                    </div>
+                    <div class="matched-item-field">
+                        <span class="matched-item-label">メーカー:</span>
+                        <span class="matched-item-value">${item['メーカー']}</span>
+                    </div>
+                    <div class="matched-item-field">
+                        <span class="matched-item-label">規格:</span>
+                        <span class="matched-item-value">${item['規格']}</span>
+                    </div>
+                    <div class="matched-item-field">
+                        <span class="matched-item-label">現在在庫:</span>
+                        <span class="matched-item-value">${item['在庫数']} 個</span>
+                    </div>
+                    <div class="matched-item-field">
+                        <span class="matched-item-label">コード:</span>
+                        <span class="matched-item-value">${item['コード']}</span>
+                    </div>
+                `;
+
+                document.getElementById('matchedItemDisplay').innerHTML = html;
+            }
+
+            setTransactionType(type) {
+                this.currentTransactionType = type;
+                const inBtn = document.getElementById('inButton');
+                const outBtn = document.getElementById('outButton');
+
+                if (type === '入庫') {
+                    inBtn.style.background = 'var(--primary)';
+                    inBtn.style.color = 'var(--surface)';
+                    outBtn.style.background = 'var(--surface)';
+                    outBtn.style.color = 'var(--text)';
+                } else {
+                    inBtn.style.background = 'var(--surface)';
+                    inBtn.style.color = 'var(--text)';
+                    outBtn.style.background = 'var(--red)';
+                    outBtn.style.color = 'var(--surface)';
+                }
+            }
+
+            async submitTransaction() {
+                if (!this.currentScanItem) {
+                    alert('品目が選択されていません');
+                    return;
+                }
+
+                const person = document.getElementById('transactionPerson').value.trim();
+                const quantity = parseInt(document.getElementById('transactionQuantity').value) || 0;
+                const expiry = document.getElementById('transactionExpiry').value.trim();
+                const lot = document.getElementById('transactionLot').value.trim();
+                const comment = document.getElementById('transactionComment').value.trim();
+
+                if (quantity <= 0) {
+                    alert('数量を入力してください');
+                    return;
+                }
+
+                if (!person) {
+                    alert('担当者名を入力してください');
+                    return;
+                }
+
+                if (this.currentTransactionType === '入庫') {
+                    this.currentScanItem['在庫数'] += quantity;
+                    if (expiry && !this.currentScanItem['入庫後最新使用期限(日付)']) {
+                        this.currentScanItem['入庫後最新使用期限(日付)'] = parseInt(expiry);
+                        this.currentScanItem['入庫後最新使用期限'] = this.formatDate(expiry);
+                    }
+                } else {
+                    this.currentScanItem['在庫数'] = Math.max(0, this.currentScanItem['在庫数'] - quantity);
+                }
+
+                await this.saveItem(this.currentScanItem);
+
+                const historyEntry = {
+                    '入出庫日': new Date().toISOString(),
+                    '入出庫者': person,
+                    '物品コード': this.currentScanItem['物品コード'],
+                    'メーカー': this.currentScanItem['メーカー'],
+                    '物品名': this.currentScanItem['物品名'],
+                    '使用期限': expiry,
+                    'ロット番号': lot,
+                    '規格': this.currentScanItem['規格'],
+                    '数量': quantity,
+                    '入庫/出庫': this.currentTransactionType,
+                    'コメント': comment
+                };
+
+                await this.saveHistory(historyEntry);
+
+                document.getElementById('scannerResult').innerHTML = `
+                    <div class="card">
+                        <div class="alert alert-success">
+                            ✅ ${this.currentTransactionType}を登録しました
+                        </div>
+                    </div>
+                `;
+
+                setTimeout(() => this.resetTransaction(), 1500);
+
+                await this.loadData();
+                this.updateDashboard();
+            }
+
+            resetTransaction() {
+                document.getElementById('barcodeInput').value = '';
+                document.getElementById('transactionPerson').value = '';
+                document.getElementById('transactionQuantity').value = '';
+                document.getElementById('transactionExpiry').value = '';
+                document.getElementById('transactionLot').value = '';
+                document.getElementById('transactionComment').value = '';
+                document.getElementById('scannerResult').innerHTML = '';
+                document.getElementById('transactionForm').style.display = 'none';
+                this.currentScanItem = null;
+                this.setTransactionType('入庫');
+            }
+
+            startScanner() {
+                const container = document.getElementById('scannerContainer');
+                const video = document.getElementById('video');
+
+                if (this.scannerActive) return;
+
+                container.style.display = 'block';
+                this.scannerActive = true;
+
+                Quagga.init(
+                    {
+                        inputStream: {
+                            name: 'Live',
+                            type: 'LiveStream',
+                            target: video,
+                            constraints: { facingMode: 'environment' }
+                        },
+                        decoder: {
+                            readers: [
+                                'code_128_reader', 'ean_reader', 'ean_8_reader',
+                                'qr_reader', 'code_39_reader', 'code_39_vin_reader',
+                                'codabar_reader', 'upc_reader', 'upc_e_reader', 'i2of5_reader'
+                            ],
+                            debug: { showCanvas: false, showPatternLabel: false, showLogs: false }
+                        }
+                    },
+                    (err) => {
+                        if (err) return;
+                        Quagga.start();
+                        Quagga.onDetected((result) => {
+                            const code = result.codeResult.code;
+                            this.processBarcodeInput(code);
+                            this.stopScanner();
+                        });
+                    }
+                );
+            }
+
+            stopScanner() {
+                if (!this.scannerActive) return;
+                try {
+                    Quagga.stop();
+                    Quagga.offDetected();
+                } catch (e) {}
+                document.getElementById('scannerContainer').style.display = 'none';
+                this.scannerActive = false;
+            }
+
+            filterHistory() {
+                const dateFrom = document.getElementById('historyDateFrom').valueAsDate;
+                const dateTo = document.getElementById('historyDateTo').valueAsDate;
+                const itemName = document.getElementById('historyItemName').value.toLowerCase();
+                const type = document.getElementById('historyType').value;
+
+                if (!dateFrom || !dateTo) {
+                    alert('期間を設定してください');
+                    return;
+                }
+
+                const filtered = this.history.filter(entry => {
+                    const entryDate = new Date(entry['入出庫日']);
+                    entryDate.setHours(0, 0, 0, 0);
+
+                    return entryDate >= dateFrom &&
+                        entryDate <= dateTo &&
+                        (!itemName || entry['物品名'].toLowerCase().includes(itemName)) &&
+                        (!type || entry['入庫/出庫'] === type);
+                });
+
+                this.displayHistory(filtered);
+            }
+
+            displayHistory(entries) {
+                const html = entries.length > 0
+                    ? `<table class="table">
+                        <thead>
+                            <tr>
+                                <th>日付</th>
+                                <th>品目</th>
+                                <th>種別</th>
+                                <th>数量</th>
+                                <th>担当者</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${entries.reverse().map(entry => `
+                                <tr>
+                                    <td>${new Date(entry['入出庫日']).toLocaleDateString('ja-JP')}</td>
+                                    <td>${entry['物品名']}</td>
+                                    <td><span class="badge-pill ${entry['入庫/出庫'] === '出庫' ? 'danger' : 'success'}">${entry['入庫/出庫']}</span></td>
+                                    <td>${entry['数量']}</td>
+                                    <td>${entry['入出庫者'] || '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>`
+                    : `<div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-title">入出庫履歴がありません</div>
+                    </div>`;
+
+                document.getElementById('historyTable').innerHTML = html;
+            }
+
+            exportHistory() {
+                const dateFrom = document.getElementById('historyDateFrom').valueAsDate;
+                const dateTo = document.getElementById('historyDateTo').valueAsDate;
+                const itemName = document.getElementById('historyItemName').value.toLowerCase();
+                const type = document.getElementById('historyType').value;
+
+                if (!dateFrom || !dateTo) {
+                    alert('期間を設定してください');
+                    return;
+                }
+
+                const filtered = this.history.filter(entry => {
+                    const entryDate = new Date(entry['入出庫日']);
+                    entryDate.setHours(0, 0, 0, 0);
+
+                    return entryDate >= dateFrom &&
+                        entryDate <= dateTo &&
+                        (!itemName || entry['物品名'].toLowerCase().includes(itemName)) &&
+                        (!type || entry['入庫/出庫'] === type);
+                });
+
+                if (filtered.length === 0) {
+                    alert('エクスポート対象の記録がありません');
+                    return;
+                }
+
+                const csv = this.convertToCSV(filtered);
+                this.downloadCSV(csv, 'inventory-history.csv');
+            }
+
+            convertToCSV(data) {
+                if (data.length === 0) return '';
+
+                const headers = Object.keys(data[0]);
+                const csv = [headers.map(h => `"${h}"`).join(',')];
+
+                for (const row of data) {
+                    const values = headers.map(header => {
+                        let value = row[header];
+                        if (value === null || value === undefined) value = '';
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+                            return `"${value.replace(/"/g, '""')}"`;
+                        }
+                        return `"${value}"`;
+                    });
+                    csv.push(values.join(','));
+                }
+
+                return csv.join('\n');
+            }
+
+            downloadCSV(csv, filename) {
+                const bom = '\uFEFF';
+                const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+
+            async importData() {
+                const fileInput = document.getElementById('importFile');
+                const file = fileInput.files[0];
+
+                if (!file) {
+                    this.showAlert('importAlert', 'ファイルを選択してください', 'error');
+                    return;
+                }
+
+                try {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+
+                    await this.deleteAllItems();
+
+                    const dbSheet = workbook.Sheets['データベース'];
+                    if (dbSheet) {
+                        const dbData = XLSX.utils.sheet_to_json(dbSheet);
+                        for (const item of dbData) {
+                            item['コード'] = String(item['コード']).padStart(6, '0');
+                            item['物品コード'] = String(item['物品コード']).padStart(6, '0');
+                            item['在庫数'] = parseInt(item['在庫数']) || 0;
+                            if (item['入庫後最新使用期限(日付)']) {
+                                item['入庫後最新使用期限(日付)'] = parseInt(item['入庫後最新使用期限(日付)']) || null;
+                            }
+                            item.id = item['コード'];
+                            await this.saveItem(item);
+                        }
+                    }
+
+                    await this.loadData();
+                    this.updateDashboard();
+
+                    this.showAlert('importAlert', `✅ ${this.items.length}件の品目をインポートしました`, 'success');
+
+                    setTimeout(() => {
+                        document.getElementById('importModal').classList.remove('active');
+                        fileInput.value = '';
+                    }, 1500);
+                } catch (error) {
+                    console.error('Import error:', error);
+                    this.showAlert('importAlert', `❌ インポートエラー: ${error.message}`, 'error');
+                }
+            }
+
+            async exportData() {
+                try {
+                    const wb = XLSX.utils.book_new();
+
+                    const itemsWs = XLSX.utils.json_to_sheet(this.items);
+                    XLSX.utils.book_append_sheet(wb, itemsWs, 'データベース');
+
+                    const historyWs = XLSX.utils.json_to_sheet(this.history);
+                    XLSX.utils.book_append_sheet(wb, historyWs, '入出庫履歴');
+
+                    const timestamp = new Date().toISOString().split('T')[0];
+                    XLSX.writeFile(wb, `inventory-${timestamp}.xlsx`);
+
+                } catch (error) {
+                    console.error('Export error:', error);
+                    alert('エクスポートエラー: ' + error.message);
+                }
+            }
+
+            showAlert(elementId, message, type) {
+                const element = document.getElementById(elementId);
+                element.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+            }
+        }
+
+        const app = new InventoryApp();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('data:application/javascript,', { scope: '/' }).catch(() => {});
+        }
+    </script>
 </body>
 </html>
