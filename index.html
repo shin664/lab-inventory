@@ -2,9 +2,15 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="description" content="Laboratory Inventory Management System">
     <meta name="theme-color" content="#1555c8">
+    <!-- iOS PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="在庫管理">
+    <!-- Prevent auto-detection of phone numbers -->
+    <meta name="format-detection" content="telephone=no">
     <title>在庫管理システム</title>
 
     <style>
@@ -34,6 +40,14 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Improve touch responsiveness on mobile */
+        button, .nav-item, .btn, [onclick] {
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         html, body {
@@ -49,13 +63,14 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            padding-bottom: 70px;
+            padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
         }
 
         .app-header {
             background: var(--primary);
             color: var(--surface);
             padding: 12px 16px;
+            padding-top: calc(12px + env(safe-area-inset-top, 0px));
             box-shadow: var(--shadow);
             text-align: center;
             flex-shrink: 0;
@@ -95,7 +110,8 @@
             border-top: 1px solid var(--border);
             display: flex;
             justify-content: space-around;
-            height: 70px;
+            height: calc(70px + env(safe-area-inset-bottom, 0px));
+            padding-bottom: env(safe-area-inset-bottom, 0px);
             z-index: 100;
             box-shadow: var(--shadow);
         }
@@ -457,6 +473,9 @@
             display: block;
             object-fit: cover;
             background: #000;
+            /* Android Chrome: prevent video from going fullscreen */
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
         }
 
         #scannerViewport canvas {
@@ -1719,6 +1738,54 @@
             }
 
             /* ===== Camera-based Scanner (getUserMedia direct) ===== */
+            /* Android/iOS cross-platform compatible version */
+            async _tryGetCamera() {
+                // Strategy 1: High resolution with environment camera
+                const constraints = [
+                    {
+                        audio: false,
+                        video: {
+                            facingMode: { ideal: 'environment' },
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
+                            frameRate: { ideal: 24, max: 30 }
+                        }
+                    },
+                    // Strategy 2: Lower resolution fallback (some Android devices)
+                    {
+                        audio: false,
+                        video: {
+                            facingMode: 'environment',
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        }
+                    },
+                    // Strategy 3: Minimal constraints (last resort)
+                    {
+                        audio: false,
+                        video: {
+                            facingMode: 'environment'
+                        }
+                    },
+                    // Strategy 4: Any camera (front camera fallback)
+                    {
+                        audio: false,
+                        video: true
+                    }
+                ];
+
+                for (let i = 0; i < constraints.length; i++) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia(constraints[i]);
+                        console.log(`Camera started with strategy ${i + 1}`);
+                        return stream;
+                    } catch (e) {
+                        console.warn(`Camera strategy ${i + 1} failed:`, e.name, e.message);
+                        if (i === constraints.length - 1) throw e;
+                    }
+                }
+            }
+
             async startScanner() {
                 if (this.scannerActive) return;
                 const viewport = document.getElementById('scannerViewport');
@@ -1733,24 +1800,53 @@
                 viewport.style.display = 'block';
 
                 try {
-                    this._stream = await navigator.mediaDevices.getUserMedia({
-                        audio: false,
-                        video: {
-                            facingMode: { ideal: 'environment' },
-                            width: { ideal: 1920 },
-                            height: { ideal: 1080 },
-                            frameRate: { ideal: 30, max: 30 }
-                        }
-                    });
+                    // Check if getUserMedia is available
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error('このブラウザはカメラに対応していません。Chrome/Safariをお使いください。');
+                    }
+
+                    // Check for HTTPS (required for camera on Android)
+                    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                        throw new Error('カメラ使用にはHTTPS接続が必要です。');
+                    }
+
+                    this._stream = await this._tryGetCamera();
 
                     video.srcObject = this._stream;
-                    await video.play().catch(() => {});
 
-                    await new Promise(resolve => {
+                    // Android-specific: ensure video attributes are set
+                    video.setAttribute('playsinline', '');
+                    video.setAttribute('autoplay', '');
+                    video.setAttribute('muted', '');
+                    video.muted = true;
+
+                    // Use a more robust play approach for Android
+                    try {
+                        await video.play();
+                    } catch (playErr) {
+                        console.warn('Auto-play failed, retrying:', playErr);
+                        // Some Android browsers need a slight delay
+                        await new Promise(r => setTimeout(r, 300));
+                        await video.play();
+                    }
+
+                    // Wait for video to be ready with longer timeout for Android
+                    await new Promise((resolve, reject) => {
                         if (video.videoWidth > 0) { resolve(); return; }
-                        const onReady = () => { video.removeEventListener('loadeddata', onReady); resolve(); };
+                        const onReady = () => {
+                            video.removeEventListener('loadeddata', onReady);
+                            video.removeEventListener('loadedmetadata', onReady);
+                            resolve();
+                        };
                         video.addEventListener('loadeddata', onReady);
-                        setTimeout(resolve, 2500);
+                        video.addEventListener('loadedmetadata', onReady);
+                        // Longer timeout for slower Android devices
+                        setTimeout(() => {
+                            video.removeEventListener('loadeddata', onReady);
+                            video.removeEventListener('loadedmetadata', onReady);
+                            if (video.videoWidth > 0) resolve();
+                            else resolve(); // Proceed anyway, video may start shortly
+                        }, 5000);
                     });
 
                     this._track = this._stream.getVideoTracks()[0] || null;
@@ -1765,14 +1861,23 @@
                     document.getElementById('btnScanStop').disabled = false;
 
                     // Show torch button if supported
-                    const caps = this._track?.getCapabilities?.() || {};
-                    if (caps.torch) {
-                        document.getElementById('btnTorch').style.display = '';
-                    }
+                    try {
+                        const caps = this._track?.getCapabilities?.() || {};
+                        if (caps.torch) {
+                            document.getElementById('btnTorch').style.display = '';
+                        }
+                    } catch(e) { /* getCapabilities not supported on some browsers */ }
 
                     // Create scanning canvases
                     this._scanCanvas = document.createElement('canvas');
                     this._zxCanvas = document.createElement('canvas');
+
+                    // Detect scan resolution based on device capability
+                    const vw = video.videoWidth || 640;
+                    const vh = video.videoHeight || 480;
+                    // Cap scan resolution for performance on low-end Android
+                    this._scanMaxW = Math.min(vw, 1280);
+                    this._scanMaxH = Math.min(vh, 720);
 
                     // Setup ZXing reader
                     if (typeof ZXing !== 'undefined') {
@@ -1797,11 +1902,33 @@
                     this._q2Tick();
                     this._zxTick();
 
+                    // Log device info for debugging
+                    const ua = navigator.userAgent;
+                    const isAndroid = /android/i.test(ua);
+                    const isIOS = /iphone|ipad|ipod/i.test(ua);
+                    console.log(`Scanner started: ${isAndroid ? 'Android' : isIOS ? 'iOS' : 'Other'}, resolution: ${video.videoWidth}x${video.videoHeight}`);
+
                 } catch (e) {
                     console.error('Camera error:', e);
                     camDot.className = 'cam-dot error';
                     camStatus.textContent = '起動失敗';
-                    debugEl.textContent = 'カメラ起動に失敗しました。HTTPS必須・カメラ許可を確認してください。';
+
+                    // More helpful error messages
+                    let errorMsg = '';
+                    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+                        errorMsg = 'カメラの使用が許可されていません。ブラウザの設定でカメラ許可をしてください。\n\n【Android】設定 → アプリ → ブラウザ → 権限 → カメラを許可\n【iPhone】設定 → Safari → カメラを許可';
+                    } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+                        errorMsg = 'カメラが見つかりません。カメラ付きデバイスでお試しください。';
+                    } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+                        errorMsg = 'カメラが他のアプリで使用中か、ハードウェアエラーです。他のアプリを閉じて再試行してください。';
+                    } else if (e.name === 'OverconstrainedError') {
+                        errorMsg = 'カメラの設定に問題があります。再試行してください。';
+                    } else if (e.message) {
+                        errorMsg = e.message;
+                    } else {
+                        errorMsg = 'カメラ起動に失敗しました。HTTPS接続とカメラ許可を確認してください。';
+                    }
+                    debugEl.textContent = errorMsg;
                     viewport.style.display = 'block';
                 }
             }
@@ -1814,10 +1941,13 @@
                     this._q2Timer = setTimeout(() => this._q2Tick(), 300);
                     return;
                 }
-                this._scanCanvas.width = w;
-                this._scanCanvas.height = h;
-                this._scanCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
-                const src = this._scanCanvas.toDataURL('image/jpeg', 0.82);
+                // Use capped resolution for better Android performance
+                const sw = Math.min(w, this._scanMaxW || 1280);
+                const sh = Math.min(h, this._scanMaxH || 720);
+                this._scanCanvas.width = sw;
+                this._scanCanvas.height = sh;
+                this._scanCanvas.getContext('2d').drawImage(video, 0, 0, sw, sh);
+                const src = this._scanCanvas.toDataURL('image/jpeg', 0.75);
 
                 let done = false;
                 const guard = setTimeout(() => {
@@ -1850,17 +1980,36 @@
                 const video = document.getElementById('scanVideo');
                 const w = video.videoWidth, h = video.videoHeight;
                 if (video.readyState >= 2 && w > 0) {
-                    this._zxCanvas.width = w;
-                    this._zxCanvas.height = h;
-                    this._zxCanvas.getContext('2d').drawImage(video, 0, 0, w, h);
+                    // Use capped resolution for better Android performance
+                    const sw = Math.min(w, this._scanMaxW || 1280);
+                    const sh = Math.min(h, this._scanMaxH || 720);
+                    this._zxCanvas.width = sw;
+                    this._zxCanvas.height = sh;
+                    this._zxCanvas.getContext('2d').drawImage(video, 0, 0, sw, sh);
                     try {
                         const lum = new ZXing.HTMLCanvasElementLuminanceSource(this._zxCanvas);
                         const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
                         const result = this._zxReader.decode(bmp);
                         if (result) this._onScanDetected(result.getText());
-                    } catch(e) { /* NotFoundException = no barcode, normal */ }
+                    } catch(e) {
+                        // NotFoundException = no barcode, normal
+                        // On some Android browsers, HTMLCanvasElementLuminanceSource may fail
+                        if (e.name !== 'NotFoundException' && e.getKind?.() !== 'NotFoundException') {
+                            // Try fallback using ImageData directly
+                            try {
+                                const ctx = this._zxCanvas.getContext('2d');
+                                const imgData = ctx.getImageData(0, 0, sw, sh);
+                                const lum = new ZXing.RGBLuminanceSource(imgData.data, sw, sh);
+                                const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+                                const result = this._zxReader.decode(bmp);
+                                if (result) this._onScanDetected(result.getText());
+                            } catch(e2) { /* no barcode found or fallback also failed */ }
+                        }
+                    }
                 }
-                this._zxTimer = setTimeout(() => this._zxTick(), 300);
+                // Slightly longer interval on Android for better battery/performance
+                const interval = /android/i.test(navigator.userAgent) ? 400 : 300;
+                this._zxTimer = setTimeout(() => this._zxTick(), interval);
             }
 
             _onScanDetected(raw) {
@@ -1871,13 +2020,28 @@
 
                 // Vibrate + beep
                 if (navigator.vibrate) navigator.vibrate(30);
+                this._playBeep();
+            }
+
+            _playBeep() {
                 try {
-                    const ac = new (window.AudioContext || window.webkitAudioContext)();
-                    const o = ac.createOscillator(), g = ac.createGain();
-                    o.frequency.value = 880; g.gain.value = 0.02;
-                    o.connect(g); g.connect(ac.destination);
-                    o.start(); setTimeout(() => { o.stop(); ac.close(); }, 80);
-                } catch(e) {}
+                    // Reuse AudioContext for better performance (especially on Android)
+                    if (!this._audioCtx || this._audioCtx.state === 'closed') {
+                        this._audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    // Resume if suspended (iOS/Android autoplay policy)
+                    if (this._audioCtx.state === 'suspended') {
+                        this._audioCtx.resume();
+                    }
+                    const o = this._audioCtx.createOscillator();
+                    const g = this._audioCtx.createGain();
+                    o.frequency.value = 880;
+                    g.gain.value = 0.02;
+                    o.connect(g);
+                    g.connect(this._audioCtx.destination);
+                    o.start();
+                    o.stop(this._audioCtx.currentTime + 0.08);
+                } catch(e) { /* Audio not supported */ }
 
                 // Parse GS1 if applicable
                 const parsed = this._parseGS1(raw);
@@ -2166,11 +2330,22 @@
             downloadCSV(csv, filename) {
                 const bom = '\uFEFF';
                 const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = filename;
-                link.click();
-                URL.revokeObjectURL(link.href);
+                const url = URL.createObjectURL(blob);
+
+                // iOS Safari compatible download
+                const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+                if (isIOS && !('download' in document.createElement('a'))) {
+                    // Fallback: open in new tab for iOS Safari < 13
+                    window.open(url, '_blank');
+                } else {
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
             }
 
             async importData() {
@@ -2244,6 +2419,27 @@
         }
 
         const app = new InventoryApp();
+
+        // Handle page visibility changes (Android: camera disconnects in background)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && app.scannerActive) {
+                // Page went to background - stop scanner to release camera
+                app._wasScanning = true;
+                app.stopScanner();
+            } else if (!document.hidden && app._wasScanning) {
+                // Page came back to foreground - restart scanner
+                app._wasScanning = false;
+                setTimeout(() => app.startScanner(), 500);
+            }
+        });
+
+        // Handle Android Chrome tab switching / app switching
+        window.addEventListener('focus', () => {
+            if (app._wasScanning && !app.scannerActive) {
+                app._wasScanning = false;
+                setTimeout(() => app.startScanner(), 500);
+            }
+        });
 
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('data:application/javascript,', { scope: '/' }).catch(() => {});
