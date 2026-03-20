@@ -2021,6 +2021,19 @@
                 // Vibrate + beep
                 if (navigator.vibrate) navigator.vibrate(30);
                 this._playBeep();
+
+                // Parse GS1 if applicable
+                const parsed = this._parseGS1(raw);
+                const lookupCode = parsed.gtin || raw;
+
+                document.getElementById('camStatus').textContent = '読み取りOK ✓ ' + lookupCode;
+
+                // Try to match item
+                this.processBarcodeInput(lookupCode);
+
+                // Auto-fill expiry and lot if parsed from GS1
+                if (parsed.exp) document.getElementById('transactionExpiry').value = parsed.exp;
+                if (parsed.lot) document.getElementById('transactionLot').value = parsed.lot;
             }
 
             _playBeep() {
@@ -2042,19 +2055,6 @@
                     o.start();
                     o.stop(this._audioCtx.currentTime + 0.08);
                 } catch(e) { /* Audio not supported */ }
-
-                // Parse GS1 if applicable
-                const parsed = this._parseGS1(raw);
-                const lookupCode = parsed.gtin || raw;
-
-                document.getElementById('camStatus').textContent = '読み取りOK ✓ ' + lookupCode;
-
-                // Try to match item
-                this.processBarcodeInput(lookupCode);
-
-                // Auto-fill expiry and lot if parsed from GS1
-                if (parsed.exp) document.getElementById('transactionExpiry').value = parsed.exp;
-                if (parsed.lot) document.getElementById('transactionLot').value = parsed.lot;
             }
 
             _parseGS1(rawInput) {
