@@ -11,6 +11,8 @@
     <meta name="apple-mobile-web-app-title" content="在庫管理">
     <!-- Prevent auto-detection of phone numbers -->
     <meta name="format-detection" content="telephone=no">
+    <!-- Android 16: explicitly allow camera access -->
+    <meta http-equiv="Permissions-Policy" content="camera=*">
     <title>在庫管理システム</title>
 
     <style>
@@ -1740,6 +1742,21 @@
             /* ===== Camera-based Scanner (getUserMedia direct) ===== */
             /* Android/iOS cross-platform compatible version */
             async _tryGetCamera() {
+                // Android 16+: check permission state first via Permissions API
+                if (navigator.permissions && navigator.permissions.query) {
+                    try {
+                        const permResult = await navigator.permissions.query({ name: 'camera' });
+                        if (permResult.state === 'denied') {
+                            const err = new Error('カメラの使用が許可されていません');
+                            err.name = 'NotAllowedError';
+                            throw err;
+                        }
+                    } catch (permErr) {
+                        // Re-throw only if it's a real denial; ignore if Permissions API doesn't support 'camera'
+                        if (permErr.name === 'NotAllowedError') throw permErr;
+                    }
+                }
+
                 // Strategy 1: High resolution with environment camera
                 const constraints = [
                     {
@@ -1915,8 +1932,21 @@
 
                     // More helpful error messages
                     let errorMsg = '';
+                    const ua = navigator.userAgent || '';
+                    const androidVer = (ua.match(/Android\s+(\d+)/i) || [])[1];
+                    const isAndroid16Plus = androidVer && parseInt(androidVer) >= 16;
+
                     if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
-                        errorMsg = 'カメラの使用が許可されていません。ブラウザの設定でカメラ許可をしてください。\n\n【Android】設定 → アプリ → ブラウザ → 権限 → カメラを許可\n【iPhone】設定 → Safari → カメラを許可';
+                        if (isAndroid16Plus) {
+                            errorMsg = 'カメラの使用が許可されていません（Android 16）。\n\n【手順】設定 → プライバシー → 権限マネージャー → カメラ → Chrome → 許可\nまたは：設定 → アプリ → Chrome → 権限 → カメラ → 許可';
+                        } else {
+                            errorMsg = 'カメラの使用が許可されていません。ブラウザの設定でカメラ許可をしてください。\n\n【Android】設定 → アプリ → ブラウザ → 権限 → カメラを許可\n【iPhone】設定 → Safari → カメラを許可';
+                        }
+                    } else if (e.name === 'SecurityError') {
+                        // Android 16 throws SecurityError when camera blocked at OS level
+                        errorMsg = 'セキュリティポリシーによりカメラへのアクセスがブロックされています。\n\n【Android 16の場合】\n① 設定 → プライバシー → 権限マネージャー → カメラ → Chrome → 許可\n② または設定 → アプリ → Chrome → 権限 → カメラ → 許可\n③ Chromeのアドレスバー左のアイコン → サイトの設定 → カメラ → 許可';
+                    } else if (e.name === 'AbortError') {
+                        errorMsg = 'カメラの起動が中断されました。他のアプリがカメラを使用中の可能性があります。カメラを使用している他のアプリを閉じて再試行してください。';
                     } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
                         errorMsg = 'カメラが見つかりません。カメラ付きデバイスでお試しください。';
                     } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
